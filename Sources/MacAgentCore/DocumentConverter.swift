@@ -49,16 +49,18 @@ public struct MicrosoftWordDocumentConverter: DocumentConverting {
             throw DocumentConversionError.wordUnavailable
         }
 
+        let pending = records.filter { !$0.skippedBecausePDFExists }
         var converted: [DocxRecord] = []
-        for record in records where !record.skippedBecausePDFExists {
-            log("Converting \(record.sourceURL.lastPathComponent) to \(record.destinationURL.lastPathComponent)")
-            try runAppleScript(source: record.sourceURL, destination: record.destinationURL)
+        for (index, record) in pending.enumerated() {
+            log("Converting \(index + 1)/\(pending.count): \(record.sourceURL.lastPathComponent) to \(record.destinationURL.lastPathComponent)")
+            try await runAppleScript(source: record.sourceURL, destination: record.destinationURL)
             converted.append(record)
+            log("Converted \(index + 1)/\(pending.count): \(record.destinationURL.lastPathComponent)")
         }
         return converted
     }
 
-    private func runAppleScript(source: URL, destination: URL) throws {
+    private func runAppleScript(source: URL, destination: URL) async throws {
         let script = """
         tell application "Microsoft Word"
             set sourceFile to POSIX file "\(Self.escapeAppleScript(source.path))"
@@ -70,21 +72,13 @@ public struct MicrosoftWordDocumentConverter: DocumentConverting {
         end tell
         """
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
+        let result = try await AsyncProcessRunner.run(
+            executablePath: "/usr/bin/osascript",
+            arguments: ["-e", script]
+        )
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? "<unreadable osascript output>"
-            throw DocumentConversionError.conversionFailed(output)
+        guard result.terminationStatus == 0 else {
+            throw DocumentConversionError.conversionFailed(result.output)
         }
     }
 
@@ -111,9 +105,10 @@ public struct MockDocumentConverter: DocumentConverting {
             throw DocumentConversionError.wordUnavailable
         }
 
+        let pending = records.filter { !$0.skippedBecausePDFExists }
         var converted: [DocxRecord] = []
-        for record in records where !record.skippedBecausePDFExists {
-            log("Writing mock placeholder \(record.destinationURL.lastPathComponent)")
+        for (index, record) in pending.enumerated() {
+            log("Writing mock placeholder \(index + 1)/\(pending.count): \(record.destinationURL.lastPathComponent)")
             let markdown = """
             Mock PDF placeholder
             Source DOCX: \(record.sourceURL.path)
@@ -125,6 +120,7 @@ public struct MockDocumentConverter: DocumentConverting {
                 throw DocumentConversionError.mockWriteFailed(error.localizedDescription)
             }
             converted.append(record)
+            log("Wrote mock placeholder \(index + 1)/\(pending.count): \(record.destinationURL.lastPathComponent)")
         }
         return converted
     }

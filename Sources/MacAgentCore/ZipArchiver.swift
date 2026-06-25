@@ -27,22 +27,14 @@ public struct ProcessZipArchiver: ZipArchiving {
             throw ZipArchiverError.noFiles
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.currentDirectoryURL = sourceFolder
-        process.arguments = ["-q", outputURL.path] + files.map { $0.pathRelative(to: sourceFolder) }
+        let result = try await AsyncProcessRunner.run(
+            executablePath: "/usr/bin/zip",
+            arguments: ["-q", outputURL.path] + files.map { $0.pathRelative(to: sourceFolder) },
+            currentDirectoryURL: sourceFolder
+        )
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? "<unreadable output>"
-            throw ZipArchiverError.failed(process.terminationStatus, output)
+        guard result.terminationStatus == 0 else {
+            throw ZipArchiverError.failed(result.terminationStatus, result.output)
         }
     }
 }

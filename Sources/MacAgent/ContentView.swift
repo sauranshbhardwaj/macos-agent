@@ -10,6 +10,10 @@ struct ContentView: View {
             commandInput
             controls
 
+            if viewModel.isRunning {
+                BusyPanel(logStore: viewModel.logStore)
+            }
+
             if let error = viewModel.errorMessage {
                 ErrorBanner(message: error)
             }
@@ -207,6 +211,32 @@ private struct LogPanel: View {
         case .summarize:
             return .secondary
         }
+    }
+}
+
+private struct BusyPanel: View {
+    @ObservedObject var logStore: AgentLogStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            Text(latestMessage)
+                .font(.caption.weight(.medium))
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var latestMessage: String {
+        guard let event = logStore.events.last else {
+            return "Working..."
+        }
+        return "\(event.phase.rawValue): \(event.message)"
     }
 }
 

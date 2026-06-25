@@ -100,6 +100,92 @@ The tests cover:
 - injected DOCX converter behavior
 - Hacker News Markdown generation with fixture data
 
+## Manual End-to-End Validation
+
+These checks require your macOS session, an API key, and consent for any privacy prompts.
+
+### 1. Launch With OpenAI
+
+```bash
+export OPENAI_API_KEY="sk-..."
+env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
+```
+
+If your shell supports `OPENAI_MODEL`, leave it unset for `gpt-5.5` or set it explicitly:
+
+```bash
+export OPENAI_MODEL="gpt-5.5"
+```
+
+After launch, click the sparkle menu-bar icon.
+
+### 2. Validate Largest Files
+
+Create a Desktop folder with several files of different sizes:
+
+```bash
+mkdir -p ~/Desktop/MacAgentDemo
+printf 'small' > ~/Desktop/MacAgentDemo/small.txt
+dd if=/dev/zero of=~/Desktop/MacAgentDemo/medium.bin bs=1024 count=256
+dd if=/dev/zero of=~/Desktop/MacAgentDemo/large.bin bs=1024 count=512
+dd if=/dev/zero of=~/Desktop/MacAgentDemo/larger.bin bs=1024 count=768
+```
+
+Run this in MacAgent with dry run enabled:
+
+```text
+Find the 3 largest files in ~/Desktop/MacAgentDemo and zip them.
+```
+
+Confirm that the preview lists three files and a zip write. Disable dry run, run again, confirm, and verify a `largest-files-*.zip` appears in the folder.
+
+### 3. Validate DOCX Conversion
+
+Create or copy one or more `.docx` files into:
+
+```bash
+mkdir -p ~/Documents/MacAgentDocs
+```
+
+Run:
+
+```text
+Convert all .docx to .pdf in ~/Documents/MacAgentDocs.
+```
+
+Expected behavior:
+
+- Dry run lists the PDFs that would be created.
+- Non-dry-run asks for confirmation.
+- macOS may ask for permission to control Microsoft Word or access Documents.
+- Existing PDFs with matching names are skipped.
+
+If Word is unavailable and you only want to exercise the loop:
+
+```bash
+export MAC_AGENT_MOCK_DOCX=1
+```
+
+Then relaunch MacAgent. Mock mode creates `.mock.pdf` placeholders, not real PDFs.
+
+### 4. Validate Hacker News
+
+Run:
+
+```text
+Open Hacker News, grab the top 5 headlines, save to a Markdown file.
+```
+
+Expected behavior:
+
+- Dry run previews the browser open and Markdown write.
+- Non-dry-run opens Hacker News in the default browser.
+- A `hacker-news-*.md` file appears on Desktop.
+
+### 5. Watch Responsiveness
+
+During zip creation and DOCX conversion, the popover should keep showing the spinner, latest status, and log updates. If the spinner stops for a long time or the popover cannot be interacted with, note the command, folder size, and current log line.
+
 ## Architecture
 
 - `MacAgent`: AppKit status item plus SwiftUI popover.

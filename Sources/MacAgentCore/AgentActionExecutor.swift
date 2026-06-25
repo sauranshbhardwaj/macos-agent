@@ -142,7 +142,9 @@ public final class AgentActionExecutor {
         }
 
         log(.observe, "Selected \(files.count) files")
-        log(.act, "Creating \(spec.outputURL.path)")
+        let totalBytes = files.reduce(Int64(0)) { $0 + $1.byteCount }
+        let totalSize = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+        log(.act, "Creating \(spec.outputURL.path) from \(files.count) files (\(totalSize))")
         try await zipArchiver.createArchive(sourceFolder: spec.folder, files: files.map(\.url), outputURL: spec.outputURL)
         log(.summarize, "Created zip archive")
         return "Created \(spec.outputURL.lastPathComponent) with \(files.count) largest files from \(spec.folder.path)."
@@ -192,6 +194,11 @@ public final class AgentActionExecutor {
         let pending = records.filter { !$0.skippedBecausePDFExists }
         let skipped = records.count - pending.count
         log(.observe, "Found \(records.count) .docx files, skipping \(skipped) existing PDFs")
+        guard !pending.isEmpty else {
+            log(.summarize, "No DOCX files needed conversion")
+            return "No DOCX files needed conversion in \(spec.folder.path). Skipped \(skipped) existing PDF outputs."
+        }
+        log(.act, "Starting \(pending.count) conversion(s) with \(documentConverter.modeName)")
         let converted = try await documentConverter.convert(records) { message in
             log(.act, message)
         }
