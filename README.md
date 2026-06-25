@@ -36,6 +36,7 @@ In this Codex sandbox, SwiftPM may need its own package sandbox disabled and its
 
 ```bash
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift build --disable-sandbox
+env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox
 ```
 
@@ -117,18 +118,18 @@ If your shell supports `OPENAI_MODEL`, leave it unset for `gpt-5.5` or set it ex
 export OPENAI_MODEL="gpt-5.5"
 ```
 
-After launch, click the sparkle menu-bar icon.
+After launch, click the `Agent` item in the menu bar.
 
 ### 2. Validate Largest Files
 
 Create a Desktop folder with several files of different sizes:
 
 ```bash
-mkdir -p ~/Desktop/MacAgentDemo
-printf 'small' > ~/Desktop/MacAgentDemo/small.txt
-dd if=/dev/zero of=~/Desktop/MacAgentDemo/medium.bin bs=1024 count=256
-dd if=/dev/zero of=~/Desktop/MacAgentDemo/large.bin bs=1024 count=512
-dd if=/dev/zero of=~/Desktop/MacAgentDemo/larger.bin bs=1024 count=768
+mkdir -p "$HOME/Desktop/MacAgentDemo"
+printf 'small' > "$HOME/Desktop/MacAgentDemo/small.txt"
+dd if=/dev/zero of="$HOME/Desktop/MacAgentDemo/medium.bin" bs=1024 count=256
+dd if=/dev/zero of="$HOME/Desktop/MacAgentDemo/large.bin" bs=1024 count=512
+dd if=/dev/zero of="$HOME/Desktop/MacAgentDemo/larger.bin" bs=1024 count=768
 ```
 
 Run this in MacAgent with dry run enabled:
@@ -147,6 +148,15 @@ Create or copy one or more `.docx` files into:
 mkdir -p ~/Documents/MacAgentDocs
 ```
 
+To create simple test documents from Terminal:
+
+```bash
+printf 'Document one\nThis is a MacAgent DOCX conversion test.\n' > /tmp/macagent-one.txt
+printf 'Document two\nThis is another MacAgent DOCX conversion test.\n' > /tmp/macagent-two.txt
+textutil -convert docx /tmp/macagent-one.txt -output "$HOME/Documents/MacAgentDocs/one.docx"
+textutil -convert docx /tmp/macagent-two.txt -output "$HOME/Documents/MacAgentDocs/two.docx"
+```
+
 Run:
 
 ```text
@@ -158,6 +168,7 @@ Expected behavior:
 - Dry run lists the PDFs that would be created.
 - Non-dry-run asks for confirmation.
 - macOS may ask for permission to control Microsoft Word or access Documents.
+- Word exports to a temporary PDF first, then MacAgent moves the finished PDF to the requested folder.
 - Existing PDFs with matching names are skipped.
 
 If Word is unavailable and you only want to exercise the loop:

@@ -101,6 +101,7 @@ public struct MicrosoftWordDocumentConverter: DocumentConverting {
 
         do {
             try fileManager.moveItem(at: temporaryPDF, to: destination)
+            OutputFileNormalizer.normalizeUserWritablePDF(at: destination, fileManager: fileManager)
         } catch {
             throw DocumentConversionError.conversionFailed("Could not move exported PDF to \(destination.path): \(error.localizedDescription)")
         }
@@ -110,6 +111,19 @@ public struct MicrosoftWordDocumentConverter: DocumentConverting {
         value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+}
+
+enum OutputFileNormalizer {
+    static func normalizeUserWritablePDF(at url: URL, fileManager: FileManager = .default) {
+        try? fileManager.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+
+        let userName = NSUserName()
+        if !userName.isEmpty {
+            try? fileManager.setAttributes([.ownerAccountName: userName], ofItemAtPath: url.path)
+        }
+
+        try? fileManager.setAttributes([.groupOwnerAccountName: "staff"], ofItemAtPath: url.path)
     }
 }
 

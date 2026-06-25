@@ -98,6 +98,21 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func outputFileNormalizerMakesPDFUserReadable() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pdf = root.appendingPathComponent("normalized.pdf")
+        try write("%PDF-1.7", to: pdf)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: pdf.path)
+
+        OutputFileNormalizer.normalizeUserWritablePDF(at: pdf)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: pdf.path)
+        let permissions = try #require(attributes[.posixPermissions] as? NSNumber)
+        #expect(permissions.intValue & 0o777 == 0o644)
+    }
+
+    @Test
     func hackerNewsDryRunDoesNotWriteMarkdown() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
