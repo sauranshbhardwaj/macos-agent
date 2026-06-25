@@ -2,6 +2,12 @@
 
 MacAgent is a minimal macOS menu-bar prototype that turns a natural-language request into a validated local action plan, previews side effects, asks for confirmation, executes one of three fixed workflows, and shows a live log plus final summary.
 
+
+
+https://github.com/user-attachments/assets/16a27d55-868f-48a6-9583-6a4d5231a1f5
+
+
+
 ## Supported Commands
 
 - `Find the 3 largest files in ~/Desktop/TestFolder and zip them.`
