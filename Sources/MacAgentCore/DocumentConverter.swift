@@ -61,14 +61,28 @@ public struct MicrosoftWordDocumentConverter: DocumentConverting {
     }
 
     private func runAppleScript(source: URL, destination: URL) async throws {
+        let temporaryPDF = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent("macagent-\(UUID().uuidString).pdf")
+        defer {
+            try? fileManager.removeItem(at: temporaryPDF)
+        }
+
         let script = """
         tell application "Microsoft Word"
             set sourceFile to POSIX file "\(Self.escapeAppleScript(source.path))"
-            set outputFile to "\(Self.escapeAppleScript(destination.path))"
-            open sourceFile
+            set outputFile to "\(Self.escapeAppleScript(temporaryPDF.path))"
+            open sourceFile add to recent files false
+            delay 0.5
             set activeDoc to active document
-            save as activeDoc file name outputFile file format format PDF
-            close activeDoc saving no
+            try
+                save as activeDoc file name outputFile file format format PDF add to recent files false
+                close activeDoc saving no
+            on error errMsg number errNum
+                try
+                    close activeDoc saving no
+                end try
+                error errMsg number errNum
+            end try
         end tell
         """
 
@@ -79,6 +93,16 @@ public struct MicrosoftWordDocumentConverter: DocumentConverting {
 
         guard result.terminationStatus == 0 else {
             throw DocumentConversionError.conversionFailed(result.output)
+        }
+
+        guard fileManager.fileExists(atPath: temporaryPDF.path) else {
+            throw DocumentConversionError.conversionFailed("Microsoft Word did not produce a temporary PDF.")
+        }
+
+        do {
+            try fileManager.moveItem(at: temporaryPDF, to: destination)
+        } catch {
+            throw DocumentConversionError.conversionFailed("Could not move exported PDF to \(destination.path): \(error.localizedDescription)")
         }
     }
 
