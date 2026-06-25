@@ -7,6 +7,7 @@ struct ContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            SetupStatusPanel(viewModel: viewModel)
             commandInput
             controls
 
@@ -71,19 +72,23 @@ struct ContentView: View {
 
             Spacer()
 
-            Button {
-                Task {
-                    await viewModel.reset()
+            if viewModel.canCancel {
+                Button {
+                    viewModel.cancelCurrentRun()
+                } label: {
+                    Label("Cancel", systemImage: "xmark.circle")
                 }
+            }
+
+            Button {
+                viewModel.reset()
             } label: {
                 Label("Reset", systemImage: "arrow.counterclockwise")
             }
             .disabled(viewModel.isRunning)
 
             Button {
-                Task {
-                    await viewModel.start()
-                }
+                viewModel.start()
             } label: {
                 Label(viewModel.primaryButtonTitle, systemImage: viewModel.primaryButtonIcon)
             }
@@ -91,6 +96,28 @@ struct ContentView: View {
             .disabled(!viewModel.canSubmit)
             .buttonStyle(.borderedProminent)
         }
+    }
+}
+
+private struct SetupStatusPanel: View {
+    @ObservedObject var viewModel: AgentViewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash")
+                .foregroundStyle(viewModel.hasAPIKey ? .green : .orange)
+            Text(viewModel.setupStatus)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(viewModel.hasAPIKey ? Color.secondary : Color.orange)
+            Spacer()
+            Text("Whitelist: Desktop, Documents")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -350,9 +377,7 @@ private struct ConfirmationView: View {
                     dismiss()
                 }
                 Button {
-                    Task {
-                        await viewModel.executeConfirmed()
-                    }
+                    viewModel.executeConfirmed()
                 } label: {
                     Label("Execute", systemImage: "checkmark.circle")
                 }

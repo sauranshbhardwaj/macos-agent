@@ -35,6 +35,25 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func asyncProcessRunnerCancelsRunningProcess() async throws {
+        let task = Task {
+            try await AsyncProcessRunner.run(executablePath: "/bin/sleep", arguments: ["5"])
+        }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected process cancellation to throw CancellationError.")
+        } catch is CancellationError {
+            return
+        } catch {
+            Issue.record("Expected CancellationError, got \(error).")
+        }
+    }
+
+    @Test
     func defaultZipOutputIsStableBetweenPreviewAndExecution() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

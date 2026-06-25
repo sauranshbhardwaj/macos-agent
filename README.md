@@ -101,6 +101,25 @@ The tests cover:
 - injected DOCX converter behavior
 - Hacker News Markdown generation with fixture data
 
+## Packaging Decision
+
+This prototype currently ships as a SwiftPM-launched menu-bar app:
+
+```bash
+swift run MacAgent
+```
+
+That keeps iteration fast and avoids committing generated `.app` bundles, ad-hoc signing output, or notarization artifacts. A signed `.app` wrapper is the next packaging step once the prototype behavior is accepted.
+
+## Known Limitations
+
+- `OPENAI_API_KEY` must be present before launching the app.
+- The whitelist is intentionally fixed to `~/Desktop` and `~/Documents`.
+- Cancellation is best-effort for active subprocesses and cannot undo a write that already completed.
+- Microsoft Word conversion depends on Word being installed and macOS Automation/Documents permissions being granted.
+- The app is not signed, notarized, sandboxed, or distributed as a production `.app` bundle yet.
+- The agent only executes the three supported workflows; unsupported requests are rejected rather than generalized into shell commands.
+
 ## Manual End-to-End Validation
 
 These checks require your macOS session, an API key, and consent for any privacy prompts.
@@ -196,6 +215,22 @@ Expected behavior:
 ### 5. Watch Responsiveness
 
 During zip creation and DOCX conversion, the popover should keep showing the spinner, latest status, and log updates. If the spinner stops for a long time or the popover cannot be interacted with, note the command, folder size, and current log line.
+
+## Final Smoke Test
+
+Before treating the prototype as complete, run this from a fresh checkout:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift build --disable-sandbox
+env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox \
+  -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
+  -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
+  -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib
+env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
+```
+
+Then dry-run all three supported commands, run the zip and Hacker News flows for real, and run DOCX conversion for real if Microsoft Word permissions are available.
 
 ## Architecture
 
