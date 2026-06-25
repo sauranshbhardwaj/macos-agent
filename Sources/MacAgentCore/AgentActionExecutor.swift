@@ -68,6 +68,12 @@ public final class AgentActionExecutor {
         self.now = now
     }
 
+    public func prepare(plan: AgentPlan) throws -> PreparedAgentRun {
+        let resolvedPlan = try resolveDefaultOutputs(in: plan)
+        let previews = try preview(plan: resolvedPlan)
+        return PreparedAgentRun(plan: resolvedPlan, previews: previews)
+    }
+
     public func preview(plan: AgentPlan) throws -> [ActionPreview] {
         try validateSupported(plan)
 
@@ -90,24 +96,43 @@ public final class AgentActionExecutor {
         plan: AgentPlan,
         log: @escaping (AgentPhase, String) -> Void
     ) async throws -> AgentRunResult {
-        let previews = try preview(plan: plan)
+        let resolvedPlan = try resolveDefaultOutputs(in: plan)
+        let previews = try preview(plan: resolvedPlan)
 
-        if plan.steps.contains(where: { $0.operation == .createZip || $0.operation == .scanSelectLargestFiles }) {
-            let summary = try await executeLargestFiles(plan, log: log)
-            return AgentRunResult(plan: plan, previews: previews, summary: summary)
+        if resolvedPlan.steps.contains(where: { $0.operation == .createZip || $0.operation == .scanSelectLargestFiles }) {
+            let summary = try await executeLargestFiles(resolvedPlan, log: log)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
         }
 
-        if plan.steps.contains(where: { $0.operation == .scanDocx || $0.operation == .convertDocxToPDF }) {
-            let summary = try await executeDocxConversion(plan, log: log)
-            return AgentRunResult(plan: plan, previews: previews, summary: summary)
+        if resolvedPlan.steps.contains(where: { $0.operation == .scanDocx || $0.operation == .convertDocxToPDF }) {
+            let summary = try await executeDocxConversion(resolvedPlan, log: log)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
         }
 
-        if plan.steps.contains(where: { $0.operation == .openHackerNews || $0.operation == .fetchHNHeadlines || $0.operation == .writeMarkdown }) {
-            let summary = try await executeHackerNews(plan, log: log)
-            return AgentRunResult(plan: plan, previews: previews, summary: summary)
+        if resolvedPlan.steps.contains(where: { $0.operation == .openHackerNews || $0.operation == .fetchHNHeadlines || $0.operation == .writeMarkdown }) {
+            let summary = try await executeHackerNews(resolvedPlan, log: log)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
         }
 
         throw AgentExecutionError.invalidPlan("No executable supported operation was present.")
+    }
+
+    private func resolveDefaultOutputs(in plan: AgentPlan) throws -> AgentPlan {
+        try validateSupported(plan)
+        var resolvedPlan = plan
+
+        if let zipIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .createZip }) {
+            let outputPath = resolvedPlan.steps[zipIndex].outputPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if outputPath?.isEmpty != false {
+                resolvedPlan.steps[zipIndex].outputPath = try largestFileSpec(resolvedPlan).outputURL.path
+            }
+        }
+
+        if let markdownIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .writeMarkdown }) {
+            resolvedPlan.steps[markdownIndex].outputPath = try hackerNewsSpec(resolvedPlan).outputURL.path
+        }
+
+        return resolvedPlan
     }
 
     private func validateSupported(_ plan: AgentPlan) throws {

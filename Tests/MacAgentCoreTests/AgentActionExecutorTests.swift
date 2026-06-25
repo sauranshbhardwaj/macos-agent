@@ -35,6 +35,41 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func defaultZipOutputIsStableBetweenPreviewAndExecution() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("small", to: root.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: root.appendingPathComponent("large.txt"))
+        let executor = makeExecutor(root: root)
+        let plan = AgentPlan(
+            summary: "Zip largest files.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan",
+                    operation: .scanSelectLargestFiles,
+                    description: "Scan files",
+                    inputPath: root.path,
+                    count: 3
+                ),
+                AgentStep(
+                    id: "zip",
+                    operation: .createZip,
+                    description: "Zip files",
+                    inputPath: root.path,
+                    count: 3
+                )
+            ]
+        )
+
+        let prepared = try executor.prepare(plan: plan)
+        let previewPath = try #require(prepared.previews.first?.writes.first)
+        _ = try await executor.execute(plan: prepared.plan) { _, _ in }
+
+        #expect(FileManager.default.fileExists(atPath: previewPath))
+    }
+
+    @Test
     func docxDryRunSkipsExistingPDFAndWritesNothing() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

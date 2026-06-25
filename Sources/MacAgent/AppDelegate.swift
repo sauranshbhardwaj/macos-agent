@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "MacAgent")
+        item.button?.imagePosition = .imageLeading
+        item.button?.title = " Agent"
         item.button?.action = #selector(togglePopover(_:))
         item.button?.target = self
         statusItem = item
@@ -16,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 560, height: 720)
         popover.contentViewController = NSHostingController(rootView: ContentView())
+
+        print("MacAgent is running. Click the Agent item in the macOS menu bar to open it.")
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {

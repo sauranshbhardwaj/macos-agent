@@ -27,9 +27,9 @@ public final class AgentRunner {
         let plan = try await planner.plan(command: trimmed)
         logStore.append(.observe, "Received plan: \(plan.summary)")
         logStore.append(.validate, "Validating whitelist and supported operations")
-        let previews = try executor.preview(plan: plan)
-        logStore.append(.preview, "Prepared \(previews.count) preview item(s)")
-        return PreparedAgentRun(plan: plan, previews: previews)
+        let preparedRun = try executor.prepare(plan: plan)
+        logStore.append(.preview, "Prepared \(preparedRun.previews.count) preview item(s)")
+        return preparedRun
     }
 
     public func execute(_ preparedRun: PreparedAgentRun) async throws -> AgentRunResult {

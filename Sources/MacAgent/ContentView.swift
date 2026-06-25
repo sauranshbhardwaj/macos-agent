@@ -18,24 +18,7 @@ struct ContentView: View {
                 ErrorBanner(message: error)
             }
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if let plan = viewModel.plan {
-                        PlanPanel(plan: plan)
-                    }
-
-                    if !viewModel.previews.isEmpty {
-                        PreviewPanel(previews: viewModel.previews)
-                    }
-
-                    LogPanel(logStore: viewModel.logStore)
-
-                    if !viewModel.finalSummary.isEmpty {
-                        SummaryPanel(summary: viewModel.finalSummary, copy: viewModel.copySummary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
         }
         .padding(18)
         .frame(width: 560, height: 720)
@@ -107,6 +90,52 @@ struct ContentView: View {
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(!viewModel.canSubmit)
             .buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+private struct RunDetailsView: View {
+    @ObservedObject var viewModel: AgentViewModel
+    @ObservedObject var logStore: AgentLogStore
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if let plan = viewModel.plan {
+                        PlanPanel(plan: plan)
+                    }
+
+                    if !viewModel.previews.isEmpty {
+                        PreviewPanel(previews: viewModel.previews)
+                    }
+
+                    LogPanel(logStore: logStore)
+
+                    if !viewModel.finalSummary.isEmpty {
+                        SummaryPanel(summary: viewModel.finalSummary, copy: viewModel.copySummary)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("run-bottom")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: logStore.events.count) { _, _ in
+                scrollToBottom(proxy)
+            }
+            .onChange(of: viewModel.finalSummary) { _, _ in
+                scrollToBottom(proxy)
+            }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo("run-bottom", anchor: .bottom)
+            }
         }
     }
 }
