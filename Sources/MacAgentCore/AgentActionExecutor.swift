@@ -6,6 +6,7 @@ public enum AgentExecutionError: Error, LocalizedError, Equatable {
     case missingPath(String)
     case invalidPlan(String)
     case noMatchingFiles(String)
+    case missingClarificationQuestion
 
     public var errorDescription: String? {
         switch self {
@@ -19,6 +20,8 @@ public enum AgentExecutionError: Error, LocalizedError, Equatable {
             return "The generated plan is invalid: \(detail)"
         case .noMatchingFiles(let detail):
             return detail
+        case .missingClarificationQuestion:
+            return "The planner asked for clarification but did not include a question."
         }
     }
 }
@@ -26,10 +29,12 @@ public enum AgentExecutionError: Error, LocalizedError, Equatable {
 public struct PreparedAgentRun: Equatable, Sendable {
     public var plan: AgentPlan
     public var previews: [ActionPreview]
+    public var clarificationQuestion: String?
 
-    public init(plan: AgentPlan, previews: [ActionPreview]) {
+    public init(plan: AgentPlan, previews: [ActionPreview], clarificationQuestion: String? = nil) {
         self.plan = plan
         self.previews = previews
+        self.clarificationQuestion = clarificationQuestion
     }
 
     public var sideEffects: [String] {
@@ -45,6 +50,8 @@ public final class AgentActionExecutor {
     private let documentConverter: DocumentConverting
     private let browserOpener: BrowserOpening
     private let hackerNewsFetcher: HackerNewsFetching
+    private let appCatalog: MacAppCatalog
+    private let appOpener: AppOpening
     private let fileManager: FileManager
     private let now: () -> Date
 
@@ -55,6 +62,8 @@ public final class AgentActionExecutor {
         documentConverter: DocumentConverting = AutoDocumentConverter(),
         browserOpener: BrowserOpening = WorkspaceBrowserOpener(),
         hackerNewsFetcher: HackerNewsFetching = HackerNewsAPIClient(),
+        appCatalog: MacAppCatalog = .default,
+        appOpener: AppOpening = WorkspaceAppOpener(),
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
     ) {
@@ -64,32 +73,49 @@ public final class AgentActionExecutor {
         self.documentConverter = documentConverter
         self.browserOpener = browserOpener
         self.hackerNewsFetcher = hackerNewsFetcher
+        self.appCatalog = appCatalog
+        self.appOpener = appOpener
         self.fileManager = fileManager
         self.now = now
     }
 
     public func prepare(plan: AgentPlan) throws -> PreparedAgentRun {
+        if let question = try clarificationQuestion(in: plan) {
+            let preview = ActionPreview(
+                title: "Clarification needed",
+                details: [question]
+            )
+            return PreparedAgentRun(plan: plan, previews: [preview], clarificationQuestion: question)
+        }
+
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
         let previews = try preview(plan: resolvedPlan)
         return PreparedAgentRun(plan: resolvedPlan, previews: previews)
     }
 
     public func preview(plan: AgentPlan) throws -> [ActionPreview] {
-        try validateSupported(plan)
-
-        if plan.steps.contains(where: { $0.operation == .createZip || $0.operation == .scanSelectLargestFiles }) {
+        switch try workflow(in: plan) {
+        case .clarify:
+            guard let question = try clarificationQuestion(in: plan) else {
+                throw AgentExecutionError.missingClarificationQuestion
+            }
+            return [
+                ActionPreview(
+                    title: "Clarification needed",
+                    details: [question]
+                )
+            ]
+        case .largestFiles:
             return [try previewLargestFiles(plan)]
-        }
-
-        if plan.steps.contains(where: { $0.operation == .scanDocx || $0.operation == .convertDocxToPDF }) {
+        case .docx:
             return [try previewDocxConversion(plan)]
-        }
-
-        if plan.steps.contains(where: { $0.operation == .openHackerNews || $0.operation == .fetchHNHeadlines || $0.operation == .writeMarkdown }) {
+        case .hackerNews:
             return [try previewHackerNews(plan)]
+        case .openApp:
+            return [try previewOpenApp(plan)]
+        case .openURL:
+            return [try previewOpenURL(plan)]
         }
-
-        throw AgentExecutionError.invalidPlan("No executable supported operation was present.")
     }
 
     public func execute(
@@ -99,26 +125,88 @@ public final class AgentActionExecutor {
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
         let previews = try preview(plan: resolvedPlan)
 
-        if resolvedPlan.steps.contains(where: { $0.operation == .createZip || $0.operation == .scanSelectLargestFiles }) {
+        switch try workflow(in: resolvedPlan) {
+        case .clarify:
+            throw AgentExecutionError.missingClarificationQuestion
+        case .largestFiles:
             let summary = try await executeLargestFiles(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
-        }
-
-        if resolvedPlan.steps.contains(where: { $0.operation == .scanDocx || $0.operation == .convertDocxToPDF }) {
+            let suggestions = try largestFileSuggestions(resolvedPlan)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary, suggestions: suggestions)
+        case .docx:
             let summary = try await executeDocxConversion(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
-        }
-
-        if resolvedPlan.steps.contains(where: { $0.operation == .openHackerNews || $0.operation == .fetchHNHeadlines || $0.operation == .writeMarkdown }) {
+            let suggestions = try docxSuggestions(resolvedPlan)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary, suggestions: suggestions)
+        case .hackerNews:
             let summary = try await executeHackerNews(resolvedPlan, log: log)
+            let suggestions = try hackerNewsSuggestions(resolvedPlan)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary, suggestions: suggestions)
+        case .openApp:
+            let summary = try await executeOpenApp(resolvedPlan, log: log)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+        case .openURL:
+            let summary = try await executeOpenURL(resolvedPlan, log: log)
             return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
         }
+    }
 
-        throw AgentExecutionError.invalidPlan("No executable supported operation was present.")
+    private enum Workflow: Equatable {
+        case clarify
+        case largestFiles
+        case docx
+        case hackerNews
+        case openApp
+        case openURL
+    }
+
+    private func workflow(in plan: AgentPlan) throws -> Workflow {
+        try validateSupported(plan)
+
+        let workflows = Set(try plan.steps.map { step in
+            try workflow(for: step.operation)
+        })
+
+        guard workflows.count == 1, let workflow = workflows.first else {
+            throw AgentExecutionError.invalidPlan("A plan must contain exactly one supported workflow.")
+        }
+
+        return workflow
+    }
+
+    private func workflow(for operation: AgentOperation) throws -> Workflow {
+        switch operation {
+        case .clarify:
+            return .clarify
+        case .scanSelectLargestFiles, .createZip:
+            return .largestFiles
+        case .scanDocx, .convertDocxToPDF:
+            return .docx
+        case .openHackerNews, .fetchHNHeadlines, .writeMarkdown:
+            return .hackerNews
+        case .openApp:
+            return .openApp
+        case .openURL:
+            return .openURL
+        case .unsupported:
+            throw AgentExecutionError.unsupported("Unsupported operation.")
+        }
+    }
+
+    private func clarificationQuestion(in plan: AgentPlan) throws -> String? {
+        guard try workflow(in: plan) == .clarify else {
+            return nil
+        }
+
+        guard let question = plan.steps.first(where: { $0.operation == .clarify })?.question?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !question.isEmpty else {
+            throw AgentExecutionError.missingClarificationQuestion
+        }
+
+        return question
     }
 
     private func resolveDefaultOutputs(in plan: AgentPlan) throws -> AgentPlan {
-        try validateSupported(plan)
+        _ = try workflow(in: plan)
         var resolvedPlan = plan
 
         if let zipIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .createZip }) {
@@ -262,6 +350,87 @@ public final class AgentActionExecutor {
         return "Saved \(headlines.count) Hacker News headlines to \(spec.outputURL.path)."
     }
 
+    private func previewOpenApp(_ plan: AgentPlan) throws -> ActionPreview {
+        let spec = try appSpec(plan)
+        return ActionPreview(
+            title: "Open \(spec.app.displayName)",
+            details: [
+                "Bundle: \(spec.app.bundleIdentifier)",
+                "Allowed apps: \(appCatalog.displayList)"
+            ],
+            opens: [spec.app.displayName]
+        )
+    }
+
+    private func executeOpenApp(
+        _ plan: AgentPlan,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> String {
+        let spec = try appSpec(plan)
+        log(.act, "Opening \(spec.app.displayName)")
+        try await appOpener.open(bundleIdentifier: spec.app.bundleIdentifier)
+        log(.summarize, "Opened \(spec.app.displayName)")
+        return "Opened \(spec.app.displayName)."
+    }
+
+    private func previewOpenURL(_ plan: AgentPlan) throws -> ActionPreview {
+        let spec = try urlSpec(plan)
+        return ActionPreview(
+            title: "Open URL",
+            details: ["Open \(spec.url.absoluteString)"],
+            opens: [spec.url.absoluteString]
+        )
+    }
+
+    private func executeOpenURL(
+        _ plan: AgentPlan,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> String {
+        let spec = try urlSpec(plan)
+        log(.act, "Opening \(spec.url.absoluteString)")
+        try await browserOpener.open(spec.url)
+        log(.summarize, "Opened URL")
+        return "Opened \(spec.url.absoluteString)."
+    }
+
+    private func largestFileSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
+        let spec = try largestFileSpec(plan)
+        return [
+            RunSuggestion(
+                title: "Reveal zip in Finder",
+                kind: .revealInFinder,
+                value: spec.outputURL.path
+            )
+        ]
+    }
+
+    private func docxSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
+        let spec = try docxSpec(plan)
+        return [
+            RunSuggestion(
+                title: "Reveal PDFs in Finder",
+                kind: .revealInFinder,
+                value: spec.outputFolder?.path ?? spec.folder.path
+            )
+        ]
+    }
+
+    private func hackerNewsSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
+        let spec = try hackerNewsSpec(plan)
+        return [
+            RunSuggestion(
+                title: "Open Markdown",
+                kind: .openFile,
+                value: spec.outputURL.path
+            ),
+            RunSuggestion(
+                title: "Reveal Markdown in Finder",
+                kind: .revealInFinder,
+                value: spec.outputURL.path
+            )
+        ]
+    }
+
     private struct LargestFileSpec {
         var folder: URL
         var count: Int
@@ -314,6 +483,28 @@ public final class AgentActionExecutor {
     private struct HackerNewsSpec {
         var count: Int
         var outputURL: URL
+    }
+
+    private struct AppSpec {
+        var app: MacApp
+    }
+
+    private func appSpec(_ plan: AgentPlan) throws -> AppSpec {
+        guard let step = plan.steps.first(where: { $0.operation == .openApp }) else {
+            throw AgentExecutionError.invalidPlan("open_app step is missing.")
+        }
+        return AppSpec(app: try appCatalog.resolve(step.appName))
+    }
+
+    private struct URLSpec {
+        var url: URL
+    }
+
+    private func urlSpec(_ plan: AgentPlan) throws -> URLSpec {
+        guard let step = plan.steps.first(where: { $0.operation == .openURL }) else {
+            throw AgentExecutionError.invalidPlan("open_url step is missing.")
+        }
+        return URLSpec(url: try SafeURL.validateWebURL(step.targetURL))
     }
 
     private func hackerNewsSpec(_ plan: AgentPlan) throws -> HackerNewsSpec {

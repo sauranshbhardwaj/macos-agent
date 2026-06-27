@@ -20,6 +20,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var outputPath: String?
     public var count: Int?
     public var targetURL: String?
+    public var appName: String?
+    public var question: String?
 
     public init(
         id: String,
@@ -28,7 +30,9 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         inputPath: String? = nil,
         outputPath: String? = nil,
         count: Int? = nil,
-        targetURL: String? = nil
+        targetURL: String? = nil,
+        appName: String? = nil,
+        question: String? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -37,6 +41,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.outputPath = outputPath
         self.count = count
         self.targetURL = targetURL
+        self.appName = appName
+        self.question = question
     }
 }
 
@@ -48,6 +54,9 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case openHackerNews = "open_hacker_news"
     case fetchHNHeadlines = "fetch_hn_headlines"
     case writeMarkdown = "write_markdown"
+    case openApp = "open_app"
+    case openURL = "open_url"
+    case clarify
     case unsupported
 }
 
@@ -85,7 +94,9 @@ public enum AgentPlanDecoder {
         "inputPath",
         "outputPath",
         "count",
-        "targetURL"
+        "targetURL",
+        "appName",
+        "question"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -151,7 +162,9 @@ public enum AgentPlanSchema {
                                 "inputPath",
                                 "outputPath",
                                 "count",
-                                "targetURL"
+                                "targetURL",
+                                "appName",
+                                "question"
                             ],
                             "properties": [
                                 "id": ["type": "string"],
@@ -175,6 +188,14 @@ public enum AgentPlanSchema {
                                 "targetURL": [
                                     "type": ["string", "null"],
                                     "description": "URL for browser/fetch actions, or null."
+                                ],
+                                "appName": [
+                                    "type": ["string", "null"],
+                                    "description": "Human app name for open_app actions, or null."
+                                ],
+                                "question": [
+                                    "type": ["string", "null"],
+                                    "description": "Clarifying question for clarify actions, or null."
                                 ]
                             ]
                         ]

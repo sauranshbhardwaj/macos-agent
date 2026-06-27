@@ -108,6 +108,75 @@ struct AgentPlanDecoderTests {
     }
 
     @Test
+    func decodesAppURLAndClarifyPlans() throws {
+        let appJSON = """
+        {
+          "summary": "Open Safari.",
+          "requiresConfirmation": true,
+          "steps": [
+            {
+              "id": "open-app",
+              "operation": "open_app",
+              "description": "Open Safari.",
+              "inputPath": null,
+              "outputPath": null,
+              "count": null,
+              "targetURL": null,
+              "appName": "Safari",
+              "question": null
+            }
+          ]
+        }
+        """
+
+        let urlJSON = """
+        {
+          "summary": "Open GitHub.",
+          "requiresConfirmation": true,
+          "steps": [
+            {
+              "id": "open-url",
+              "operation": "open_url",
+              "description": "Open GitHub.",
+              "inputPath": null,
+              "outputPath": null,
+              "count": null,
+              "targetURL": "https://github.com",
+              "appName": null,
+              "question": null
+            }
+          ]
+        }
+        """
+
+        let clarifyJSON = """
+        {
+          "summary": "Need a folder.",
+          "requiresConfirmation": false,
+          "steps": [
+            {
+              "id": "clarify",
+              "operation": "clarify",
+              "description": "Ask which folder to scan.",
+              "inputPath": null,
+              "outputPath": null,
+              "count": null,
+              "targetURL": null,
+              "appName": null,
+              "question": "Which folder should I scan?"
+            }
+          ]
+        }
+        """
+
+        #expect(try AgentPlanDecoder.decodeStrict(from: appJSON).steps[0].operation == .openApp)
+        #expect(try AgentPlanDecoder.decodeStrict(from: urlJSON).steps[0].operation == .openURL)
+        let clarify = try AgentPlanDecoder.decodeStrict(from: clarifyJSON)
+        #expect(clarify.steps[0].operation == .clarify)
+        #expect(clarify.steps[0].question == "Which folder should I scan?")
+    }
+
+    @Test
     func parsesResponsesOutputText() throws {
         let response = """
         {

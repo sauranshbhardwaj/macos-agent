@@ -11,12 +11,20 @@ struct ContentView: View {
             commandInput
             controls
 
+            if viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
+                VoiceStatusPanel(viewModel: viewModel)
+            }
+
             if viewModel.isRunning {
                 BusyPanel(logStore: viewModel.logStore)
             }
 
             if let error = viewModel.errorMessage {
                 ErrorBanner(message: error)
+            }
+
+            if let question = viewModel.clarificationQuestion {
+                ClarificationPanel(viewModel: viewModel, question: question)
             }
 
             RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
@@ -61,6 +69,12 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...5)
                 .disabled(viewModel.isRunning)
+
+            if !viewModel.voiceTranscript.isEmpty {
+                Label("Transcript ready", systemImage: "waveform")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -69,6 +83,13 @@ struct ContentView: View {
             Toggle("Dry run", isOn: $viewModel.dryRun)
                 .toggleStyle(.switch)
                 .disabled(viewModel.isRunning)
+
+            Button {
+                viewModel.toggleVoiceRecording()
+            } label: {
+                Label(viewModel.voiceButtonTitle, systemImage: viewModel.voiceButtonIcon)
+            }
+            .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
 
             Spacer()
 
@@ -103,16 +124,19 @@ private struct SetupStatusPanel: View {
     @ObservedObject var viewModel: AgentViewModel
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash")
-                .foregroundStyle(viewModel.hasAPIKey ? .green : .orange)
-            Text(viewModel.setupStatus)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(viewModel.hasAPIKey ? Color.secondary : Color.orange)
-            Spacer()
-            Text("Whitelist: Desktop, Documents")
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Image(systemName: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash")
+                    .foregroundStyle(viewModel.hasAPIKey ? .green : .orange)
+                Text(viewModel.setupStatus)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(viewModel.hasAPIKey ? Color.secondary : Color.orange)
+                Spacer()
+            }
+            Text("Tools: files, docs, Hacker News, allowlisted apps, web URLs")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(2)
         }
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -130,7 +154,7 @@ private struct RunDetailsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     if let plan = viewModel.plan {
-                        PlanPanel(plan: plan)
+                        PlanPanel(plan: plan, stepStatuses: viewModel.stepStatuses)
                     }
 
                     if !viewModel.previews.isEmpty {
@@ -140,7 +164,12 @@ private struct RunDetailsView: View {
                     LogPanel(logStore: logStore)
 
                     if !viewModel.finalSummary.isEmpty {
-                        SummaryPanel(summary: viewModel.finalSummary, copy: viewModel.copySummary)
+                        SummaryPanel(
+                            summary: viewModel.finalSummary,
+                            suggestions: viewModel.suggestions,
+                            copy: viewModel.copySummary,
+                            runSuggestion: viewModel.runSuggestion
+                        )
                     }
 
                     Color.clear
@@ -169,6 +198,7 @@ private struct RunDetailsView: View {
 
 private struct PlanPanel: View {
     let plan: AgentPlan
+    let stepStatuses: [String: AgentStepStatus]
 
     var body: some View {
         Panel(title: "Plan", systemImage: "list.bullet.rectangle") {
@@ -178,16 +208,59 @@ private struct PlanPanel: View {
 
                 ForEach(plan.steps) { step in
                     HStack(alignment: .top, spacing: 8) {
+                        StepStatusIcon(status: stepStatuses[step.id] ?? .pending)
                         Text(step.operation.rawValue)
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
-                            .frame(width: 155, alignment: .leading)
+                            .frame(width: 140, alignment: .leading)
                         Text(step.description)
                             .font(.caption)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
+        }
+    }
+}
+
+private struct StepStatusIcon: View {
+    let status: AgentStepStatus
+
+    var body: some View {
+        Image(systemName: icon)
+            .font(.caption)
+            .foregroundStyle(color)
+            .frame(width: 16)
+            .help(status.rawValue)
+    }
+
+    private var icon: String {
+        switch status {
+        case .pending:
+            return "circle"
+        case .running:
+            return "play.circle"
+        case .complete:
+            return "checkmark.circle"
+        case .failed:
+            return "xmark.octagon"
+        case .canceled:
+            return "minus.circle"
+        }
+    }
+
+    private var color: Color {
+        switch status {
+        case .pending:
+            return .secondary
+        case .running:
+            return .blue
+        case .complete:
+            return .green
+        case .failed:
+            return .red
+        case .canceled:
+            return .orange
         }
     }
 }
@@ -296,9 +369,39 @@ private struct BusyPanel: View {
     }
 }
 
+private struct VoiceStatusPanel: View {
+    @ObservedObject var viewModel: AgentViewModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if viewModel.isTranscribingVoice {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "waveform")
+                    .foregroundStyle(.red)
+            }
+            Text(message)
+                .font(.caption.weight(.medium))
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var message: String {
+        viewModel.isTranscribingVoice ? "Transcribing voice command..." : "Recording voice command..."
+    }
+}
+
 private struct SummaryPanel: View {
     let summary: String
+    let suggestions: [RunSuggestion]
     let copy: () -> Void
+    let runSuggestion: (RunSuggestion) -> Void
 
     var body: some View {
         Panel(title: "Summary", systemImage: "doc.text") {
@@ -306,8 +409,53 @@ private struct SummaryPanel: View {
                 Text(summary)
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(action: copy) {
-                    Label("Copy", systemImage: "doc.on.doc")
+                HStack(spacing: 8) {
+                    Button(action: copy) {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+
+                    ForEach(suggestions) { suggestion in
+                        Button {
+                            runSuggestion(suggestion)
+                        } label: {
+                            Label(suggestion.title, systemImage: icon(for: suggestion))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func icon(for suggestion: RunSuggestion) -> String {
+        switch suggestion.kind {
+        case .revealInFinder:
+            return "folder"
+        case .openFile:
+            return "doc.text"
+        }
+    }
+}
+
+private struct ClarificationPanel: View {
+    @ObservedObject var viewModel: AgentViewModel
+    let question: String
+
+    var body: some View {
+        Panel(title: "Clarify", systemImage: "questionmark.bubble") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(question)
+                    .font(.callout.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    TextField("Answer", text: $viewModel.clarificationAnswer)
+                        .textFieldStyle(.roundedBorder)
+                    Button {
+                        viewModel.submitClarification()
+                    } label: {
+                        Label("Continue", systemImage: "arrow.right.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.clarificationAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

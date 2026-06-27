@@ -28,12 +28,14 @@ public final class OpenAIPlanner: Planning {
     private let model: String
     private let endpoint: URL
     private let session: URLSession
+    private let toolRegistry: ToolRegistry
 
     public init(
         apiKey: String? = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
         model: String = ProcessInfo.processInfo.environment["OPENAI_MODEL"] ?? "gpt-5.5",
         endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        toolRegistry: ToolRegistry = .default
     ) throws {
         guard let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PlannerError.missingAPIKey
@@ -42,6 +44,7 @@ public final class OpenAIPlanner: Planning {
         self.model = model
         self.endpoint = endpoint
         self.session = session
+        self.toolRegistry = toolRegistry
     }
 
     public func plan(command: String) async throws -> AgentPlan {
@@ -74,7 +77,7 @@ public final class OpenAIPlanner: Planning {
                     "content": [
                         [
                             "type": "input_text",
-                            "text": Self.systemPrompt
+                            "text": Self.systemPrompt(toolRegistry: toolRegistry)
                         ]
                     ]
                 ],
@@ -98,24 +101,28 @@ public final class OpenAIPlanner: Planning {
         ]
     }
 
-    private static let systemPrompt = """
+    nonisolated public static func systemPrompt(toolRegistry: ToolRegistry = .default) -> String {
+        """
     You plan a tiny macOS agent. Return only a JSON object that matches the provided schema.
 
-    Supported user intents:
-    1. Find the 3 largest files in a folder and zip them.
-    2. Convert all .docx files in a folder to .pdf.
-    3. Open Hacker News, grab the top 5 headlines, and save them to Markdown.
+    Registered local tools:
+    \(toolRegistry.plannerDescription)
 
     Important rules:
     - Use only the fixed operation enum values.
+    - Use registered tools only. Do not invent tools, commands, scripts, or APIs.
     - Include user-supplied paths exactly as written. Do not invent local file paths.
     - Use null for unavailable fields.
+    - If a folder, app name, URL, count, or output destination is required but missing or ambiguous, return exactly one clarify step with a short question.
     - For largest files, produce scan_select_largest_files then create_zip.
     - For DOCX conversion, produce scan_docx then convert_docx_to_pdf.
-    - For Hacker News, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
+    - For Hacker News headline saving, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
+    - For opening an app, produce one open_app step with appName.
+    - For opening a general website, produce one open_url step with targetURL using http or https.
     - For any unsupported request, return one unsupported step and explain why.
     - Never include shell commands, AppleScript, or code.
     """
+    }
 }
 
 public enum OpenAIResponseParser {

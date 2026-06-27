@@ -80,10 +80,41 @@ public struct AgentRunResult: Equatable, Sendable {
     public var plan: AgentPlan
     public var previews: [ActionPreview]
     public var summary: String
+    public var suggestions: [RunSuggestion]
 
-    public init(plan: AgentPlan, previews: [ActionPreview], summary: String) {
+    public init(
+        plan: AgentPlan,
+        previews: [ActionPreview],
+        summary: String,
+        suggestions: [RunSuggestion] = []
+    ) {
         self.plan = plan
         self.previews = previews
         self.summary = summary
+        self.suggestions = suggestions
     }
+}
+
+public struct RunSuggestion: Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var title: String
+    public var kind: RunSuggestionKind
+    public var value: String
+
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        kind: RunSuggestionKind,
+        value: String
+    ) {
+        self.id = id
+        self.title = title
+        self.kind = kind
+        self.value = value
+    }
+}
+
+public enum RunSuggestionKind: String, Codable, Equatable, Sendable {
+    case revealInFinder
+    case openFile
 }

@@ -1,0 +1,41 @@
+import Foundation
+import Testing
+@testable import MacAgentCore
+
+@Suite
+struct ToolRegistryTests {
+    @Test
+    func defaultRegistryDescribesNewAgentTools() {
+        let registry = ToolRegistry.default
+        let operations = registry.tools.map(\.operation)
+
+        #expect(operations.contains(.openApp))
+        #expect(operations.contains(.openURL))
+        #expect(operations.contains(.clarify))
+        #expect(registry.plannerDescription.contains("open_app"))
+        #expect(registry.plannerDescription.contains("open_url"))
+    }
+
+    @Test
+    func plannerPromptIsGeneratedFromToolRegistry() {
+        let registry = ToolRegistry(
+            tools: [
+                AgentTool(
+                    operation: .openApp,
+                    name: "Open test app",
+                    description: "Open a test app.",
+                    requiredFields: ["appName"],
+                    sideEffects: ["open app"],
+                    dryRunBehavior: "Preview the app.",
+                    examples: ["Open Test"]
+                )
+            ]
+        )
+
+        let prompt = OpenAIPlanner.systemPrompt(toolRegistry: registry)
+
+        #expect(prompt.contains("open_app"))
+        #expect(prompt.contains("Open test app"))
+        #expect(prompt.contains("Do not invent tools"))
+    }
+}

@@ -1,6 +1,6 @@
 # MacAgent
 
-MacAgent is a minimal macOS menu-bar prototype that turns a natural-language request into a validated local action plan, previews side effects, asks for confirmation, executes one of three fixed workflows, and shows a live log plus final summary.
+MacAgent is a minimal macOS menu-bar prototype that turns a typed or spoken natural-language request into a validated local action plan, previews side effects, asks for confirmation, executes registered macOS tools, and shows a live log plus final summary.
 
 
 
@@ -13,6 +13,8 @@ https://github.com/user-attachments/assets/16a27d55-868f-48a6-9583-6a4d5231a1f5
 - `Find the 3 largest files in ~/Desktop/TestFolder and zip them.`
 - `Convert all .docx to .pdf in ~/Documents/TestDocs.`
 - `Open Hacker News, grab the top 5 headlines, save to a Markdown file.`
+- `Open Safari.`
+- `Open GitHub.`
 
 Unsupported requests return a planner error instead of executing arbitrary commands.
 
@@ -31,7 +33,13 @@ Unsupported requests return a planner error instead of executing arbitrary comma
    export OPENAI_MODEL="gpt-5.5"
    ```
 
-4. Build and run:
+4. Optionally choose a transcription model for voice input. The default is `gpt-4o-mini-transcribe`.
+
+   ```bash
+   export OPENAI_TRANSCRIBE_MODEL="gpt-4o-mini-transcribe"
+   ```
+
+5. Build and run:
 
    ```bash
    swift build
@@ -52,7 +60,9 @@ The app is launched as a SwiftPM executable, so macOS may attribute permissions 
 
 - Desktop/Documents access may trigger privacy prompts.
 - DOCX conversion via Microsoft Word may trigger Automation prompts for controlling Word.
+- Voice input may trigger a Microphone prompt for Terminal, Codex, or the Swift process.
 - Hacker News opening uses the default browser via `NSWorkspace`.
+- App opening uses `NSWorkspace` and only supports the local allowlist.
 
 If a privacy prompt is denied, allow the relevant host app in System Settings, then relaunch MacAgent.
 
@@ -60,12 +70,28 @@ If a privacy prompt is denied, allow the relevant host app in System Settings, t
 
 - OpenAI receives only the natural-language command and planner instructions, not local directory listings or file contents.
 - The model returns strict JSON with a fixed operation enum.
+- The planner prompt is generated from a local `ToolRegistry`; the model can choose registered tools but cannot invent tools.
 - Swift validates every path against a default whitelist of `~/Desktop` and `~/Documents`.
 - All paths are tilde-expanded, canonicalized, and rejected if they resolve outside the whitelist.
 - Recursive scans skip symlinks.
+- General URL opening only allows `http` and `https`.
+- App opening is limited to Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Slack, VS Code, and Terminal.
+- Ambiguous requests can return a `clarify` operation that asks one question before re-planning.
 - Dry run is on by default and never writes files, opens apps, or converts documents.
 - Non-dry-run execution shows every write/open/convert side effect in a confirmation sheet.
-- Executors use fixed native adapters only: `/usr/bin/zip`, `/usr/bin/osascript` for Microsoft Word, `NSWorkspace`, and `URLSession`.
+- Executors use fixed native adapters only: `/usr/bin/zip`, `/usr/bin/osascript` for Microsoft Word, `NSWorkspace`, `AVFoundation`, and `URLSession`.
+
+## Voice Input
+
+Voice input is push-to-talk:
+
+1. Click `Speak`.
+2. Say one command.
+3. Click `Stop`.
+4. Review or edit the transcript.
+5. Click `Preview` or `Plan`.
+
+The recorded audio is written to a temporary `.m4a` file, sent to OpenAI's audio transcription endpoint, then deleted after transcription. The transcript enters the same plan, validate, dry-run, confirm, act, and observe loop as typed commands.
 
 ## DOCX Conversion
 
@@ -99,7 +125,12 @@ env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disabl
 The tests cover:
 
 - strict planner JSON decoding
+- tool registry prompt generation
 - unsupported and malformed plan rejection
+- app allowlist behavior
+- URL scheme validation
+- clarification plan handling
+- transcription client fixture responses
 - whitelist allow/reject behavior
 - symlink rejection when links resolve outside allowed roots
 - dry-run no-write behavior
@@ -122,9 +153,10 @@ That keeps iteration fast and avoids committing generated `.app` bundles, ad-hoc
 - `OPENAI_API_KEY` must be present before launching the app.
 - The whitelist is intentionally fixed to `~/Desktop` and `~/Documents`.
 - Cancellation is best-effort for active subprocesses and cannot undo a write that already completed.
+- Voice input depends on microphone permission for the host process that launched SwiftPM.
 - Microsoft Word conversion depends on Word being installed and macOS Automation/Documents permissions being granted.
 - The app is not signed, notarized, sandboxed, or distributed as a production `.app` bundle yet.
-- The agent only executes the three supported workflows; unsupported requests are rejected rather than generalized into shell commands.
+- The agent executes registered local tools only; unsupported requests are rejected rather than generalized into shell commands.
 
 ## Manual End-to-End Validation
 
@@ -134,6 +166,7 @@ These checks require your macOS session, an API key, and consent for any privacy
 
 ```bash
 export OPENAI_API_KEY="sk-..."
+export OPENAI_TRANSCRIBE_MODEL="gpt-4o-mini-transcribe"
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
 ```
 
@@ -218,7 +251,71 @@ Expected behavior:
 - Non-dry-run opens Hacker News in the default browser.
 - A `hacker-news-*.md` file appears on Desktop.
 
-### 5. Watch Responsiveness
+### 5. Validate App Opening
+
+Run with dry run enabled:
+
+```text
+Open Safari.
+```
+
+Expected behavior:
+
+- Dry run previews `Open: Safari`.
+- Non-dry-run asks for confirmation, then opens Safari.
+- Unknown apps are rejected unless they are in the allowlist.
+
+Also try:
+
+```text
+Open VS Code.
+```
+
+### 6. Validate URL Opening
+
+Run with dry run enabled:
+
+```text
+Open GitHub.
+```
+
+Expected behavior:
+
+- Dry run previews an `https://` URL.
+- Non-dry-run asks for confirmation, then opens the URL in the default browser.
+- Non-web schemes such as `file://` or `ftp://` are rejected.
+
+### 7. Validate Clarification
+
+Run an intentionally incomplete command:
+
+```text
+Find the 3 largest files and zip them.
+```
+
+Expected behavior:
+
+- The planner asks which folder to scan.
+- Enter a whitelisted folder, such as `~/Desktop/MacAgentDemo`.
+- MacAgent re-plans with the answer and shows the normal preview.
+
+### 8. Validate Voice Input
+
+Click `Speak`, say:
+
+```text
+Open Safari.
+```
+
+Click `Stop`.
+
+Expected behavior:
+
+- macOS may ask for microphone permission.
+- The transcript appears in the command box.
+- You can edit the transcript before clicking `Preview` or `Plan`.
+
+### 9. Watch Responsiveness
 
 During zip creation and DOCX conversion, the popover should keep showing the spinner, latest status, and log updates. If the spinner stops for a long time or the popover cannot be interacted with, note the command, folder size, and current log line.
 
@@ -236,12 +333,14 @@ env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disabl
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
 ```
 
-Then dry-run all three supported commands, run the zip and Hacker News flows for real, and run DOCX conversion for real if Microsoft Word permissions are available.
+Then dry-run the file, DOCX, Hacker News, app, URL, clarification, and voice flows. Run zip, Hacker News, app opening, and URL opening for real. Run DOCX conversion for real if Microsoft Word permissions are available.
 
 ## Architecture
 
 - `MacAgent`: AppKit status item plus SwiftUI popover.
 - `MacAgentCore`: planner, safety validation, action previews, executors, and tests.
 - `OpenAIPlanner`: calls the Responses API with structured JSON output.
+- `OpenAITranscriber`: calls the audio transcription API for push-to-talk voice input.
+- `ToolRegistry`: describes locally registered tools used to generate the planner prompt.
 - `AgentActionExecutor`: validates a known plan and runs only the supported workflows.
 - `AgentLogStore`: emits plan, validate, preview, confirm, act, observe, and summarize events for the UI.

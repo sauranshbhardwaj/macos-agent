@@ -162,19 +162,102 @@ struct AgentActionExecutorTests {
         #expect(markdown.contains("Fixture headline"))
     }
 
+    @Test
+    func openAppPreviewUsesAllowlist() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let preview = try executor.preview(plan: openAppPlan(appName: "Visual Studio Code"))
+
+        #expect(preview.first?.opens == ["VS Code"])
+        #expect(preview.first?.details.contains("Bundle: com.microsoft.VSCode") == true)
+    }
+
+    @Test
+    func openAppRejectsUnknownApp() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        #expect(throws: MacAppCatalogError.appNotAllowed("Untrusted App")) {
+            try executor.preview(plan: openAppPlan(appName: "Untrusted App"))
+        }
+    }
+
+    @Test
+    func openURLAllowsHTTPAndHTTPSOnly() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let preview = try executor.preview(plan: openURLPlan(url: "https://github.com"))
+
+        #expect(preview.first?.opens == ["https://github.com"])
+        #expect(throws: SafeURLError.unsupportedScheme("ftp")) {
+            try executor.preview(plan: openURLPlan(url: "ftp://example.com"))
+        }
+    }
+
+    @Test
+    func clarificationPlanPreparesQuestionWithoutSideEffects() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let prepared = try executor.prepare(plan: clarifyPlan())
+
+        #expect(prepared.clarificationQuestion == "Which folder should I scan?")
+        #expect(prepared.sideEffects.isEmpty)
+    }
+
+    @Test
+    func mixedWorkflowPlanIsRejected() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+        let plan = AgentPlan(
+            summary: "Zip and open app.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan",
+                    operation: .scanSelectLargestFiles,
+                    description: "Scan files",
+                    inputPath: root.path,
+                    count: 3
+                ),
+                AgentStep(
+                    id: "open",
+                    operation: .openApp,
+                    description: "Open Safari",
+                    appName: "Safari"
+                )
+            ]
+        )
+
+        #expect(throws: AgentExecutionError.invalidPlan("A plan must contain exactly one supported workflow.")) {
+            try executor.preview(plan: plan)
+        }
+    }
+
     private func makeExecutor(
         root: URL,
         zipArchiver: ZipArchiving = RecordingZipArchiver(),
         documentConverter: DocumentConverting = FakeDocumentConverter(),
         browserOpener: BrowserOpening = NoopBrowserOpener(),
-        hackerNewsFetcher: HackerNewsFetching = StaticHackerNewsFetcher()
+        hackerNewsFetcher: HackerNewsFetching = StaticHackerNewsFetcher(),
+        appCatalog: MacAppCatalog = .default,
+        appOpener: AppOpening = NoopAppOpener()
     ) -> AgentActionExecutor {
         AgentActionExecutor(
             whitelist: PathWhitelist(roots: [root]),
             zipArchiver: zipArchiver,
             documentConverter: documentConverter,
             browserOpener: browserOpener,
-            hackerNewsFetcher: hackerNewsFetcher
+            hackerNewsFetcher: hackerNewsFetcher,
+            appCatalog: appCatalog,
+            appOpener: appOpener
         )
     }
 
@@ -252,6 +335,51 @@ struct AgentActionExecutorTests {
         )
     }
 
+    private func openAppPlan(appName: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Open \(appName).",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-app",
+                    operation: .openApp,
+                    description: "Open \(appName).",
+                    appName: appName
+                )
+            ]
+        )
+    }
+
+    private func openURLPlan(url: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Open \(url).",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-url",
+                    operation: .openURL,
+                    description: "Open \(url).",
+                    targetURL: url
+                )
+            ]
+        )
+    }
+
+    private func clarifyPlan() -> AgentPlan {
+        AgentPlan(
+            summary: "Need clarification.",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "clarify",
+                    operation: .clarify,
+                    description: "Ask which folder to scan.",
+                    question: "Which folder should I scan?"
+                )
+            ]
+        )
+    }
+
     private func write(_ string: String, to url: URL) throws {
         try string.data(using: .utf8)?.write(to: url)
     }
@@ -280,6 +408,10 @@ private struct FakeDocumentConverter: DocumentConverting {
 
 private struct NoopBrowserOpener: BrowserOpening {
     func open(_ url: URL) async throws {}
+}
+
+private struct NoopAppOpener: AppOpening {
+    func open(bundleIdentifier: String) async throws {}
 }
 
 private struct StaticHackerNewsFetcher: HackerNewsFetching {
