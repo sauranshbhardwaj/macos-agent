@@ -5,6 +5,8 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
+    private let viewModel = AgentViewModel()
+    private var pushToTalkHotKey: PushToTalkHotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -17,21 +19,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 600, height: 740)
-        popover.contentViewController = NSHostingController(rootView: ContentView())
+        popover.contentViewController = NSHostingController(rootView: ContentView(viewModel: viewModel))
+
+        do {
+            pushToTalkHotKey = try PushToTalkHotKey(
+                onPress: { [weak self] in
+                    self?.showPopover()
+                    self?.viewModel.beginPushToTalkVoice()
+                },
+                onRelease: { [weak self] in
+                    self?.viewModel.endPushToTalkVoice()
+                }
+            )
+        } catch {
+            viewModel.markVoiceHotKeyUnavailable(error.localizedDescription)
+            print("Sonny could not register push-to-talk hotkey: \(error.localizedDescription)")
+        }
 
         print("Sonny is running. Click the Sonny item in the macOS menu bar to open it.")
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {
-        guard let button = statusItem?.button else {
+        guard statusItem?.button != nil else {
             return
         }
 
         if popover.isShown {
             popover.performClose(sender)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            showPopover()
         }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem?.button, !popover.isShown else {
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
 }

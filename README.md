@@ -12,7 +12,7 @@ https://github.com/user-attachments/assets/16a27d55-868f-48a6-9583-6a4d5231a1f5
 - Open safe web URLs with `http` or `https`.
 - Open allowlisted Mac apps: Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Apple Music, Spotify, Slack, VS Code, and Terminal.
 - Ask a clarification question when a command is missing a folder, app, URL, count, or output detail.
-- Take push-to-talk voice commands. Voice commands are transcribed, planned, validated, and executed automatically.
+- Take push-to-talk voice commands from the `Speak` button or by holding `Control-Option-Space`. Release the hotkey to transcribe, plan, validate, and execute automatically.
 
 ## Setup
 
@@ -41,6 +41,7 @@ macOS may attribute prompts to Terminal, Codex, or the Swift process.
 - Desktop/Documents access for file workflows.
 - Automation permission for Microsoft Word DOCX conversion.
 - Microphone permission for voice input.
+- Keyboard shortcut registration for global push-to-talk. If `Control-Option-Space` is already claimed by another app, Sonny will still work from the `Speak` button.
 - Browser/app opening through `NSWorkspace`.
 
 If a prompt is denied, allow the launching host app in System Settings, then relaunch Sonny.
@@ -52,7 +53,7 @@ If a prompt is denied, allow the launching host app in System Settings, then rel
 - Swift validates every plan against strict JSON, fixed operations, path whitelist rules, URL scheme rules, and the app allowlist.
 - Dry run is on by default for typed commands and never writes files, opens apps, or converts documents.
 - Typed non-dry-run commands skip extra confirmation clicks, but still plan, validate, preview internally, and log before acting.
-- Voice commands also skip extra confirmation clicks after transcription.
+- Voice commands from the button or `Control-Option-Space` also skip extra confirmation clicks after transcription.
 - Executors use fixed native adapters only: `/usr/bin/zip`, `/usr/bin/osascript`, `NSWorkspace`, `AVFoundation`, and `URLSession`.
 
 ## DOCX Conversion
@@ -96,7 +97,8 @@ Coverage includes strict plan decoding, tool registry prompt generation, app all
 3. Press Enter from the command field to preview typed commands in dry run or execute them when dry run is off.
 4. Try an incomplete request, such as `Find the 3 largest files and zip them.`, then answer Sonny's clarification.
 5. Click `Speak`, say `Open Safari`, click `Stop`, and confirm Sonny transcribes and acts without another manual execute click.
-6. Use generated result buttons such as reveal zip, open Markdown, reveal Markdown, or reveal PDFs.
+6. Hold `Control-Option-Space`, say `Open Notes`, release the keys, and confirm Sonny transcribes and acts automatically.
+7. Use generated result buttons such as reveal zip, open Markdown, reveal Markdown, or reveal PDFs.
 
 ## Architecture
 

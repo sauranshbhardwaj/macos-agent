@@ -2,7 +2,7 @@ import MacAgentCore
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var viewModel = AgentViewModel()
+    @ObservedObject var viewModel: AgentViewModel
     @FocusState private var commandFocused: Bool
 
     var body: some View {
@@ -12,7 +12,7 @@ struct ContentView: View {
             commandInput
             controls
 
-            if viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
+            if viewModel.isPreparingVoiceRecording || viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
                 VoiceStatusPanel(viewModel: viewModel)
             }
 
@@ -117,6 +117,7 @@ struct ContentView: View {
             }
             .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
             .buttonStyle(SonnyButtonStyle(tone: viewModel.isRecordingVoice ? .danger : .secondary))
+            .help("Click to speak, or hold Control-Option-Space")
 
             Spacer()
 
@@ -160,7 +161,11 @@ private struct SetupStatusPanel: View {
                 tone: viewModel.hasAPIKey ? .ready : .warning
             )
             StatusChip(title: viewModel.modelName, systemImage: "brain", tone: .neutral)
-            StatusChip(title: "Voice", systemImage: "waveform", tone: .neutral)
+            StatusChip(
+                title: viewModel.voiceHotKeyStatus,
+                systemImage: "keyboard",
+                tone: viewModel.voiceHotKeyReady ? .neutral : .warning
+            )
             Spacer()
             StatusChip(title: "Desktop, Documents", systemImage: "folder", tone: .neutral)
         }
@@ -467,7 +472,13 @@ private struct VoiceStatusPanel: View {
     }
 
     private var message: String {
-        viewModel.isTranscribingVoice ? "Transcribing voice command..." : "Recording voice command..."
+        if viewModel.isTranscribingVoice {
+            return "Transcribing voice command..."
+        }
+        if viewModel.isPreparingVoiceRecording {
+            return "Getting microphone ready..."
+        }
+        return "Recording voice command..."
     }
 }
 

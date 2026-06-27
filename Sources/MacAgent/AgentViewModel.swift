@@ -16,8 +16,11 @@ final class AgentViewModel: ObservableObject {
     @Published var suggestions: [RunSuggestion] = []
     @Published var stepStatuses: [String: AgentStepStatus] = [:]
     @Published var voiceTranscript: String = ""
+    @Published var isPreparingVoiceRecording: Bool = false
     @Published var isRecordingVoice: Bool = false
     @Published var isTranscribingVoice: Bool = false
+    @Published var voiceHotKeyStatus: String = "Hold Ctrl-Opt-Space"
+    @Published var voiceHotKeyReady: Bool = true
 
     let logStore = AgentLogStore()
 
@@ -26,6 +29,12 @@ final class AgentViewModel: ObservableObject {
     private var currentTask: Task<Void, Never>?
     private let audioRecorder = AudioCommandRecorder()
     private var clarificationAutoExecute = false
+    private var isPushToTalkHotKeyDown = false
+
+    private enum VoiceRecordingTrigger {
+        case button
+        case hotKey
+    }
 
     var hasAPIKey: Bool {
         !(ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
@@ -54,10 +63,13 @@ final class AgentViewModel: ObservableObject {
     }
 
     var canUseVoice: Bool {
-        hasAPIKey && !isRunning && !isTranscribingVoice
+        hasAPIKey && !isRunning && !isPreparingVoiceRecording && !isTranscribingVoice
     }
 
     var voiceButtonTitle: String {
+        if isPreparingVoiceRecording {
+            return "Starting"
+        }
         if isRecordingVoice {
             return "Stop"
         }
@@ -181,8 +193,42 @@ final class AgentViewModel: ObservableObject {
         if isRecordingVoice {
             stopVoiceRecordingAndTranscribe()
         } else {
-            startVoiceRecording()
+            startVoiceRecording(trigger: .button)
         }
+    }
+
+    func beginPushToTalkVoice() {
+        guard !isPushToTalkHotKeyDown else {
+            return
+        }
+        guard canUseVoice else {
+            if !hasAPIKey {
+                errorMessage = "OPENAI_API_KEY is not set. Export it before launching Sonny, then relaunch the app."
+            }
+            return
+        }
+
+        isPushToTalkHotKeyDown = true
+        startVoiceRecording(trigger: .hotKey)
+    }
+
+    func endPushToTalkVoice() {
+        guard isPushToTalkHotKeyDown else {
+            return
+        }
+
+        isPushToTalkHotKeyDown = false
+        guard isRecordingVoice else {
+            return
+        }
+
+        stopVoiceRecordingAndTranscribe()
+    }
+
+    func markVoiceHotKeyUnavailable(_ message: String) {
+        voiceHotKeyReady = false
+        voiceHotKeyStatus = "Hotkey unavailable"
+        errorMessage = message
     }
 
     func runSuggestion(_ suggestion: RunSuggestion) {
@@ -217,14 +263,16 @@ final class AgentViewModel: ObservableObject {
         suggestions = []
         stepStatuses = [:]
         voiceTranscript = ""
+        isPreparingVoiceRecording = false
         isRecordingVoice = false
         isTranscribingVoice = false
+        isPushToTalkHotKeyDown = false
         preparedRun = nil
         runner = nil
         logStore.reset()
     }
 
-    private func startVoiceRecording() {
+    private func startVoiceRecording(trigger: VoiceRecordingTrigger) {
         guard canUseVoice else {
             if !hasAPIKey {
                 errorMessage = "OPENAI_API_KEY is not set. Export it before launching Sonny, then relaunch the app."
@@ -232,21 +280,40 @@ final class AgentViewModel: ObservableObject {
             return
         }
 
+        isPreparingVoiceRecording = true
+
         Task {
             let granted = await AudioCommandRecorder.requestMicrophonePermission()
             guard granted else {
+                isPreparingVoiceRecording = false
                 errorMessage = "Microphone permission was denied. Allow microphone access for the launching app, then try again."
+                return
+            }
+
+            if trigger == .hotKey && !isPushToTalkHotKeyDown {
+                isPreparingVoiceRecording = false
                 return
             }
 
             do {
                 try audioRecorder.start()
+                if trigger == .hotKey && !isPushToTalkHotKeyDown {
+                    audioRecorder.cancel()
+                    isPreparingVoiceRecording = false
+                    return
+                }
+
+                isPreparingVoiceRecording = false
                 isRecordingVoice = true
                 voiceTranscript = ""
                 finalSummary = ""
                 errorMessage = nil
-                logStore.append(.observe, "Recording voice command")
+                let recordingMessage = trigger == .hotKey
+                    ? "Recording voice command from hotkey"
+                    : "Recording voice command"
+                logStore.append(.observe, recordingMessage)
             } catch {
+                isPreparingVoiceRecording = false
                 errorMessage = error.localizedDescription
                 logStore.append(.summarize, "Voice recording failed: \(error.localizedDescription)")
             }
@@ -260,6 +327,7 @@ final class AgentViewModel: ObservableObject {
             isRecordingVoice = false
         } catch {
             isRecordingVoice = false
+            isPushToTalkHotKeyDown = false
             errorMessage = error.localizedDescription
             return
         }
