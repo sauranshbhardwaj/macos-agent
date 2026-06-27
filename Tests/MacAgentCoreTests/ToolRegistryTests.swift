@@ -14,6 +14,8 @@ struct ToolRegistryTests {
         #expect(operations.contains(.clarify))
         #expect(registry.plannerDescription.contains("open_app"))
         #expect(registry.plannerDescription.contains("open_url"))
+        #expect(registry.plannerDescription.contains("Spotify"))
+        #expect(registry.plannerDescription.contains("Apple Music"))
     }
 
     @Test

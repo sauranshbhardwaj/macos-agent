@@ -3,9 +3,10 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var viewModel = AgentViewModel()
+    @FocusState private var commandFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             header
             SetupStatusPanel(viewModel: viewModel)
             commandInput
@@ -29,25 +30,37 @@ struct ContentView: View {
 
             RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
         }
-        .padding(18)
-        .frame(width: 560, height: 720)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .sheet(isPresented: $viewModel.showConfirmation) {
-            ConfirmationView(viewModel: viewModel)
+        .padding(20)
+        .frame(width: 600, height: 740)
+        .background(SonnyTheme.background)
+        .foregroundStyle(SonnyTheme.text)
+        .onAppear {
+            commandFocused = true
         }
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("MacAgent")
-                    .font(.system(size: 22, weight: .semibold))
-                Text("Plan. Validate. Act. Observe.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(SonnyTheme.accent.opacity(0.16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(SonnyTheme.accent.opacity(0.32), lineWidth: 1)
+                    )
+                Image(systemName: "sparkles")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(SonnyTheme.accent)
+            }
+            .frame(width: 38, height: 38)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Sonny")
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .foregroundStyle(SonnyTheme.text)
+                Text("Ask. Check. Done.")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(SonnyTheme.muted)
             }
             Spacer()
             Button {
@@ -55,25 +68,38 @@ struct ContentView: View {
             } label: {
                 Image(systemName: "power")
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(SonnyIconButtonStyle())
             .help("Quit")
         }
     }
 
     private var commandInput: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Command")
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Ask Sonny")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            TextField("Find the 3 largest files in ~/Desktop and zip them.", text: $viewModel.command, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(3...5)
+                .foregroundStyle(SonnyTheme.muted)
+            TextField("Open Safari, zip files, convert docs...", text: $viewModel.command)
+                .textFieldStyle(.plain)
+                .font(.system(size: 15, weight: .medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(SonnyTheme.input)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(commandFocused ? SonnyTheme.accent.opacity(0.72) : SonnyTheme.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .disabled(viewModel.isRunning)
+                .focused($commandFocused)
+                .submitLabel(.go)
+                .onSubmit {
+                    viewModel.start()
+                }
 
             if !viewModel.voiceTranscript.isEmpty {
-                Label("Transcript ready", systemImage: "waveform")
+                Label("Voice command received", systemImage: "waveform")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SonnyTheme.muted)
             }
         }
     }
@@ -90,6 +116,7 @@ struct ContentView: View {
                 Label(viewModel.voiceButtonTitle, systemImage: viewModel.voiceButtonIcon)
             }
             .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
+            .buttonStyle(SonnyButtonStyle(tone: viewModel.isRecordingVoice ? .danger : .secondary))
 
             Spacer()
 
@@ -99,6 +126,7 @@ struct ContentView: View {
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
+                .buttonStyle(SonnyButtonStyle(tone: .secondary))
             }
 
             Button {
@@ -107,15 +135,16 @@ struct ContentView: View {
                 Label("Reset", systemImage: "arrow.counterclockwise")
             }
             .disabled(viewModel.isRunning)
+            .buttonStyle(SonnyButtonStyle(tone: .secondary))
 
             Button {
                 viewModel.start()
             } label: {
                 Label(viewModel.primaryButtonTitle, systemImage: viewModel.primaryButtonIcon)
             }
-            .keyboardShortcut(.return, modifiers: .command)
+            .keyboardShortcut(.return, modifiers: [])
             .disabled(!viewModel.canSubmit)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(SonnyButtonStyle(tone: .primary))
         }
     }
 }
@@ -124,24 +153,63 @@ private struct SetupStatusPanel: View {
     @ObservedObject var viewModel: AgentViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 8) {
-                Image(systemName: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash")
-                    .foregroundStyle(viewModel.hasAPIKey ? .green : .orange)
-                Text(viewModel.setupStatus)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(viewModel.hasAPIKey ? Color.secondary : Color.orange)
-                Spacer()
-            }
-            Text("Tools: files, docs, Hacker News, allowlisted apps, web URLs")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
+        HStack(spacing: 8) {
+            StatusChip(
+                title: viewModel.hasAPIKey ? "Ready" : "Needs key",
+                systemImage: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash",
+                tone: viewModel.hasAPIKey ? .ready : .warning
+            )
+            StatusChip(title: viewModel.modelName, systemImage: "brain", tone: .neutral)
+            StatusChip(title: "Voice", systemImage: "waveform", tone: .neutral)
+            Spacer()
+            StatusChip(title: "Desktop, Documents", systemImage: "folder", tone: .neutral)
         }
-        .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct StatusChip: View {
+    let title: String
+    let systemImage: String
+    let tone: Tone
+
+    enum Tone {
+        case ready
+        case warning
+        case neutral
+    }
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(background)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .lineLimit(1)
+    }
+
+    private var foreground: Color {
+        switch tone {
+        case .ready:
+            return SonnyTheme.accent
+        case .warning:
+            return SonnyTheme.warning
+        case .neutral:
+            return SonnyTheme.muted
+        }
+    }
+
+    private var background: Color {
+        switch tone {
+        case .ready:
+            return SonnyTheme.accent.opacity(0.12)
+        case .warning:
+            return SonnyTheme.warning.opacity(0.14)
+        case .neutral:
+            return SonnyTheme.surfaceRaised
+        }
     }
 }
 
@@ -205,16 +273,18 @@ private struct PlanPanel: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(plan.summary)
                     .font(.callout.weight(.medium))
+                    .foregroundStyle(SonnyTheme.text)
 
                 ForEach(plan.steps) { step in
                     HStack(alignment: .top, spacing: 8) {
                         StepStatusIcon(status: stepStatuses[step.id] ?? .pending)
                         Text(step.operation.rawValue)
                             .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(SonnyTheme.muted)
                             .frame(width: 140, alignment: .leading)
                         Text(step.description)
                             .font(.caption)
+                            .foregroundStyle(SonnyTheme.text.opacity(0.9))
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -252,15 +322,15 @@ private struct StepStatusIcon: View {
     private var color: Color {
         switch status {
         case .pending:
-            return .secondary
+            return SonnyTheme.muted
         case .running:
-            return .blue
+            return SonnyTheme.info
         case .complete:
-            return .green
+            return SonnyTheme.accent
         case .failed:
-            return .red
+            return SonnyTheme.danger
         case .canceled:
-            return .orange
+            return SonnyTheme.warning
         }
     }
 }
@@ -275,18 +345,19 @@ private struct PreviewPanel: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(preview.title)
                             .font(.callout.weight(.semibold))
+                            .foregroundStyle(SonnyTheme.text)
 
                         ForEach(preview.details, id: \.self) { detail in
                             Text(detail)
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(SonnyTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
                         ForEach(preview.sideEffects, id: \.self) { sideEffect in
                             Label(sideEffect, systemImage: "exclamationmark.triangle")
                                 .font(.caption)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(SonnyTheme.warning)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -304,7 +375,7 @@ private struct LogPanel: View {
             if logStore.events.isEmpty {
                 Text("Idle")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(SonnyTheme.muted)
             } else {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(logStore.events) { event in
@@ -315,6 +386,7 @@ private struct LogPanel: View {
                                 .frame(width: 74, alignment: .leading)
                             Text(event.message)
                                 .font(.caption)
+                                .foregroundStyle(SonnyTheme.text.opacity(0.88))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -326,19 +398,19 @@ private struct LogPanel: View {
     private func phaseColor(_ phase: AgentPhase) -> Color {
         switch phase {
         case .plan:
-            return .blue
+            return SonnyTheme.info
         case .validate:
-            return .purple
+            return SonnyTheme.lilac
         case .preview:
-            return .teal
+            return SonnyTheme.cyan
         case .confirm:
-            return .orange
+            return SonnyTheme.warning
         case .act:
-            return .indigo
+            return SonnyTheme.lilac
         case .observe:
-            return .green
+            return SonnyTheme.accent
         case .summarize:
-            return .secondary
+            return SonnyTheme.muted
         }
     }
 }
@@ -352,12 +424,13 @@ private struct BusyPanel: View {
                 .controlSize(.small)
             Text(latestMessage)
                 .font(.caption.weight(.medium))
+                .foregroundStyle(SonnyTheme.text)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.08))
+        .background(SonnyTheme.info.opacity(0.11))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -379,16 +452,17 @@ private struct VoiceStatusPanel: View {
                     .controlSize(.small)
             } else {
                 Image(systemName: "waveform")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(SonnyTheme.danger)
             }
             Text(message)
                 .font(.caption.weight(.medium))
+                .foregroundStyle(SonnyTheme.text)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.blue.opacity(0.08))
+        .background(SonnyTheme.surfaceRaised)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -408,11 +482,13 @@ private struct SummaryPanel: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(summary)
                     .font(.callout)
+                    .foregroundStyle(SonnyTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     Button(action: copy) {
                         Label("Copy", systemImage: "doc.on.doc")
                     }
+                    .buttonStyle(SonnyButtonStyle(tone: .secondary))
 
                     ForEach(suggestions) { suggestion in
                         Button {
@@ -420,6 +496,7 @@ private struct SummaryPanel: View {
                         } label: {
                             Label(suggestion.title, systemImage: icon(for: suggestion))
                         }
+                        .buttonStyle(SonnyButtonStyle(tone: .secondary))
                     }
                 }
             }
@@ -445,16 +522,28 @@ private struct ClarificationPanel: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(question)
                     .font(.callout.weight(.medium))
+                    .foregroundStyle(SonnyTheme.text)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     TextField("Answer", text: $viewModel.clarificationAnswer)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(SonnyTheme.input)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(SonnyTheme.border, lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .onSubmit {
+                            viewModel.submitClarification()
+                        }
                     Button {
                         viewModel.submitClarification()
                     } label: {
                         Label("Continue", systemImage: "arrow.right.circle")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(SonnyButtonStyle(tone: .primary))
                     .disabled(viewModel.clarificationAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
@@ -468,14 +557,15 @@ private struct ErrorBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "xmark.octagon.fill")
-                .foregroundStyle(.red)
+                .foregroundStyle(SonnyTheme.danger)
             Text(message)
                 .font(.caption)
+                .foregroundStyle(SonnyTheme.text)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.red.opacity(0.08))
+        .background(SonnyTheme.danger.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
@@ -489,51 +579,100 @@ private struct Panel<Content: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
+                .foregroundStyle(SonnyTheme.text)
             content
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(SonnyTheme.surface)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(SonnyTheme.border, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
-private struct ConfirmationView: View {
-    @ObservedObject var viewModel: AgentViewModel
-    @Environment(\.dismiss) private var dismiss
+private enum SonnyTheme {
+    static let background = Color(red: 0.055, green: 0.054, blue: 0.060)
+    static let surface = Color(red: 0.092, green: 0.089, blue: 0.100)
+    static let surfaceRaised = Color(red: 0.125, green: 0.119, blue: 0.132)
+    static let input = Color(red: 0.118, green: 0.112, blue: 0.132)
+    static let border = Color(red: 0.235, green: 0.225, blue: 0.250)
+    static let text = Color(red: 0.920, green: 0.900, blue: 0.860)
+    static let muted = Color(red: 0.610, green: 0.595, blue: 0.555)
+    static let accent = Color(red: 0.685, green: 0.875, blue: 0.610)
+    static let warning = Color(red: 0.930, green: 0.655, blue: 0.350)
+    static let danger = Color(red: 0.940, green: 0.390, blue: 0.405)
+    static let info = Color(red: 0.420, green: 0.690, blue: 0.960)
+    static let cyan = Color(red: 0.375, green: 0.780, blue: 0.780)
+    static let lilac = Color(red: 0.690, green: 0.570, blue: 0.950)
+}
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Confirm", systemImage: "lock.open")
-                .font(.title2.weight(.semibold))
+private struct SonnyButtonStyle: ButtonStyle {
+    let tone: Tone
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(viewModel.confirmationItems, id: \.self) { item in
-                        Label(item, systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+    enum Tone {
+        case primary
+        case secondary
+        case danger
+    }
 
-            HStack {
-                Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                Button {
-                    viewModel.executeConfirmed()
-                } label: {
-                    Label("Execute", systemImage: "checkmark.circle")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(viewModel.isRunning)
-            }
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(background.opacity(configuration.isPressed ? 0.72 : 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var foreground: Color {
+        switch tone {
+        case .primary:
+            return Color(red: 0.050, green: 0.055, blue: 0.048)
+        case .secondary:
+            return SonnyTheme.text
+        case .danger:
+            return SonnyTheme.text
         }
-        .padding(18)
-        .frame(width: 460, height: 320)
+    }
+
+    private var background: Color {
+        switch tone {
+        case .primary:
+            return SonnyTheme.accent
+        case .secondary:
+            return SonnyTheme.surfaceRaised
+        case .danger:
+            return SonnyTheme.danger.opacity(0.58)
+        }
+    }
+
+    private var border: Color {
+        switch tone {
+        case .primary:
+            return SonnyTheme.accent.opacity(0.88)
+        case .secondary:
+            return SonnyTheme.border
+        case .danger:
+            return SonnyTheme.danger.opacity(0.7)
+        }
+    }
+}
+
+private struct SonnyIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(SonnyTheme.muted)
+            .frame(width: 30, height: 30)
+            .background(configuration.isPressed ? SonnyTheme.surfaceRaised : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

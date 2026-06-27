@@ -1,119 +1,79 @@
-# MacAgent
+# Sonny
 
-MacAgent is a minimal macOS menu-bar prototype that turns a typed or spoken natural-language request into a validated local action plan, previews side effects, asks for confirmation, executes registered macOS tools, and shows a live log plus final summary.
-
-
+Sonny is a macOS menu-bar agent prototype that turns typed or spoken natural-language requests into validated local actions. It plans with OpenAI, previews side effects, executes only registered local tools, and streams logs plus a final summary.
 
 https://github.com/user-attachments/assets/16a27d55-868f-48a6-9583-6a4d5231a1f5
 
+## What Sonny Can Do
 
-
-## Supported Commands
-
-- `Find the 3 largest files in ~/Desktop/TestFolder and zip them.`
-- `Convert all .docx to .pdf in ~/Documents/TestDocs.`
-- `Open Hacker News, grab the top 5 headlines, save to a Markdown file.`
-- `Open Safari.`
-- `Open GitHub.`
-
-Unsupported requests return a planner error instead of executing arbitrary commands.
+- Find the largest files in a whitelisted folder and zip them.
+- Convert `.docx` files to `.pdf` with Microsoft Word, or explicit mock mode.
+- Open Hacker News, fetch the top 5 headlines, and save them to Markdown.
+- Open safe web URLs with `http` or `https`.
+- Open allowlisted Mac apps: Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Apple Music, Spotify, Slack, VS Code, and Terminal.
+- Ask a clarification question when a command is missing a folder, app, URL, count, or output detail.
+- Take push-to-talk voice commands. Voice commands are transcribed, planned, validated, and executed automatically.
 
 ## Setup
 
-1. Install Xcode Command Line Tools with Swift 6 or newer.
-2. Export an OpenAI API key:
+```bash
+export OPENAI_API_KEY="sk-..."
+export OPENAI_MODEL="gpt-5.5"
+export OPENAI_TRANSCRIBE_MODEL="gpt-4o-mini-transcribe"
 
-   ```bash
-   export OPENAI_API_KEY="sk-..."
-   ```
+swift build
+swift run MacAgent
+```
 
-3. Optionally choose a model. The default is `gpt-5.5`.
-
-   ```bash
-   export OPENAI_MODEL="gpt-5.5"
-   ```
-
-4. Optionally choose a transcription model for voice input. The default is `gpt-4o-mini-transcribe`.
-
-   ```bash
-   export OPENAI_TRANSCRIBE_MODEL="gpt-4o-mini-transcribe"
-   ```
-
-5. Build and run:
-
-   ```bash
-   swift build
-   swift run MacAgent
-   ```
-
-In this Codex sandbox, SwiftPM may need its own package sandbox disabled and its Clang module cache redirected:
+In the Codex sandbox, use:
 
 ```bash
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift build --disable-sandbox
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
-env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox
 ```
 
-## macOS Permissions
+The visible product name is Sonny. The SwiftPM executable is still `MacAgent`.
 
-The app is launched as a SwiftPM executable, so macOS may attribute permissions to Terminal, Codex, or the Swift process.
+## Permissions
 
-- Desktop/Documents access may trigger privacy prompts.
-- DOCX conversion via Microsoft Word may trigger Automation prompts for controlling Word.
-- Voice input may trigger a Microphone prompt for Terminal, Codex, or the Swift process.
-- Hacker News opening uses the default browser via `NSWorkspace`.
-- App opening uses `NSWorkspace` and only supports the local allowlist.
+macOS may attribute prompts to Terminal, Codex, or the Swift process.
 
-If a privacy prompt is denied, allow the relevant host app in System Settings, then relaunch MacAgent.
+- Desktop/Documents access for file workflows.
+- Automation permission for Microsoft Word DOCX conversion.
+- Microphone permission for voice input.
+- Browser/app opening through `NSWorkspace`.
+
+If a prompt is denied, allow the launching host app in System Settings, then relaunch Sonny.
 
 ## Safety Model
 
 - OpenAI receives only the natural-language command and planner instructions, not local directory listings or file contents.
-- The model returns strict JSON with a fixed operation enum.
 - The planner prompt is generated from a local `ToolRegistry`; the model can choose registered tools but cannot invent tools.
-- Swift validates every path against a default whitelist of `~/Desktop` and `~/Documents`.
-- All paths are tilde-expanded, canonicalized, and rejected if they resolve outside the whitelist.
-- Recursive scans skip symlinks.
-- General URL opening only allows `http` and `https`.
-- App opening is limited to Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Slack, VS Code, and Terminal.
-- Ambiguous requests can return a `clarify` operation that asks one question before re-planning.
-- Dry run is on by default and never writes files, opens apps, or converts documents.
-- Non-dry-run execution shows every write/open/convert side effect in a confirmation sheet.
-- Executors use fixed native adapters only: `/usr/bin/zip`, `/usr/bin/osascript` for Microsoft Word, `NSWorkspace`, `AVFoundation`, and `URLSession`.
-
-## Voice Input
-
-Voice input is push-to-talk:
-
-1. Click `Speak`.
-2. Say one command.
-3. Click `Stop`.
-4. Review or edit the transcript.
-5. Click `Preview` or `Plan`.
-
-The recorded audio is written to a temporary `.m4a` file, sent to OpenAI's audio transcription endpoint, then deleted after transcription. The transcript enters the same plan, validate, dry-run, confirm, act, and observe loop as typed commands.
+- Swift validates every plan against strict JSON, fixed operations, path whitelist rules, URL scheme rules, and the app allowlist.
+- Dry run is on by default for typed commands and never writes files, opens apps, or converts documents.
+- Typed non-dry-run commands skip extra confirmation clicks, but still plan, validate, preview internally, and log before acting.
+- Voice commands also skip extra confirmation clicks after transcription.
+- Executors use fixed native adapters only: `/usr/bin/zip`, `/usr/bin/osascript`, `NSWorkspace`, `AVFoundation`, and `URLSession`.
 
 ## DOCX Conversion
 
-Real conversion uses Microsoft Word through a fixed AppleScript template. Existing PDF outputs are skipped.
+Real conversion uses Microsoft Word through a fixed AppleScript template. Existing matching PDFs are skipped.
 
-If Microsoft Word is not installed, mock conversion is disabled by default. To create clearly marked placeholders for demos:
+If Word is unavailable and you only need to exercise the loop:
 
 ```bash
 export MAC_AGENT_MOCK_DOCX=1
 ```
 
-Mock mode writes `.mock.pdf` placeholder files and documents that they are not real PDFs.
+Mock mode writes clearly marked `.mock.pdf` placeholders, not real PDFs.
 
 ## Tests
-
-Run:
 
 ```bash
 swift test
 ```
 
-On the local Command Line Tools install used for this prototype, SwiftPM needed explicit Swift Testing framework paths:
+On this local Command Line Tools install:
 
 ```bash
 env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox \
@@ -122,225 +82,27 @@ env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disabl
   -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib
 ```
 
-The tests cover:
-
-- strict planner JSON decoding
-- tool registry prompt generation
-- unsupported and malformed plan rejection
-- app allowlist behavior
-- URL scheme validation
-- clarification plan handling
-- transcription client fixture responses
-- whitelist allow/reject behavior
-- symlink rejection when links resolve outside allowed roots
-- dry-run no-write behavior
-- zip archive integration
-- injected DOCX converter behavior
-- Hacker News Markdown generation with fixture data
-
-## Packaging Decision
-
-This prototype currently ships as a SwiftPM-launched menu-bar app:
-
-```bash
-swift run MacAgent
-```
-
-That keeps iteration fast and avoids committing generated `.app` bundles, ad-hoc signing output, or notarization artifacts. A signed `.app` wrapper is the next packaging step once the prototype behavior is accepted.
-
-## Known Limitations
-
-- `OPENAI_API_KEY` must be present before launching the app.
-- The whitelist is intentionally fixed to `~/Desktop` and `~/Documents`.
-- Cancellation is best-effort for active subprocesses and cannot undo a write that already completed.
-- Voice input depends on microphone permission for the host process that launched SwiftPM.
-- Microsoft Word conversion depends on Word being installed and macOS Automation/Documents permissions being granted.
-- The app is not signed, notarized, sandboxed, or distributed as a production `.app` bundle yet.
-- The agent executes registered local tools only; unsupported requests are rejected rather than generalized into shell commands.
-
-## Manual End-to-End Validation
-
-These checks require your macOS session, an API key, and consent for any privacy prompts.
-
-### 1. Launch With OpenAI
-
-```bash
-export OPENAI_API_KEY="sk-..."
-export OPENAI_TRANSCRIBE_MODEL="gpt-4o-mini-transcribe"
-env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
-```
-
-If your shell supports `OPENAI_MODEL`, leave it unset for `gpt-5.5` or set it explicitly:
-
-```bash
-export OPENAI_MODEL="gpt-5.5"
-```
-
-After launch, click the `Agent` item in the menu bar.
-
-### 2. Validate Largest Files
-
-Create a Desktop folder with several files of different sizes:
-
-```bash
-mkdir -p "$HOME/Desktop/MacAgentDemo"
-printf 'small' > "$HOME/Desktop/MacAgentDemo/small.txt"
-dd if=/dev/zero of="$HOME/Desktop/MacAgentDemo/medium.bin" bs=1024 count=256
-dd if=/dev/zero of="$HOME/Desktop/MacAgentDemo/large.bin" bs=1024 count=512
-dd if=/dev/zero of="$HOME/Desktop/MacAgentDemo/larger.bin" bs=1024 count=768
-```
-
-Run this in MacAgent with dry run enabled:
-
-```text
-Find the 3 largest files in ~/Desktop/MacAgentDemo and zip them.
-```
-
-Confirm that the preview lists three files and a zip write. Disable dry run, run again, confirm, and verify a `largest-files-*.zip` appears in the folder.
-
-### 3. Validate DOCX Conversion
-
-Create or copy one or more `.docx` files into:
-
-```bash
-mkdir -p ~/Documents/MacAgentDocs
-```
-
-To create simple test documents from Terminal:
-
-```bash
-printf 'Document one\nThis is a MacAgent DOCX conversion test.\n' > /tmp/macagent-one.txt
-printf 'Document two\nThis is another MacAgent DOCX conversion test.\n' > /tmp/macagent-two.txt
-textutil -convert docx /tmp/macagent-one.txt -output "$HOME/Documents/MacAgentDocs/one.docx"
-textutil -convert docx /tmp/macagent-two.txt -output "$HOME/Documents/MacAgentDocs/two.docx"
-```
-
-Run:
-
-```text
-Convert all .docx to .pdf in ~/Documents/MacAgentDocs.
-```
-
-Expected behavior:
-
-- Dry run lists the PDFs that would be created.
-- Non-dry-run asks for confirmation.
-- macOS may ask for permission to control Microsoft Word or access Documents.
-- Word exports to a temporary PDF first, then MacAgent moves the finished PDF to the requested folder.
-- Existing PDFs with matching names are skipped.
-
-If Word is unavailable and you only want to exercise the loop:
-
-```bash
-export MAC_AGENT_MOCK_DOCX=1
-```
-
-Then relaunch MacAgent. Mock mode creates `.mock.pdf` placeholders, not real PDFs.
-
-### 4. Validate Hacker News
-
-Run:
-
-```text
-Open Hacker News, grab the top 5 headlines, save to a Markdown file.
-```
-
-Expected behavior:
-
-- Dry run previews the browser open and Markdown write.
-- Non-dry-run opens Hacker News in the default browser.
-- A `hacker-news-*.md` file appears on Desktop.
-
-### 5. Validate App Opening
-
-Run with dry run enabled:
-
-```text
-Open Safari.
-```
-
-Expected behavior:
-
-- Dry run previews `Open: Safari`.
-- Non-dry-run asks for confirmation, then opens Safari.
-- Unknown apps are rejected unless they are in the allowlist.
-
-Also try:
-
-```text
-Open VS Code.
-```
-
-### 6. Validate URL Opening
-
-Run with dry run enabled:
-
-```text
-Open GitHub.
-```
-
-Expected behavior:
-
-- Dry run previews an `https://` URL.
-- Non-dry-run asks for confirmation, then opens the URL in the default browser.
-- Non-web schemes such as `file://` or `ftp://` are rejected.
-
-### 7. Validate Clarification
-
-Run an intentionally incomplete command:
-
-```text
-Find the 3 largest files and zip them.
-```
-
-Expected behavior:
-
-- The planner asks which folder to scan.
-- Enter a whitelisted folder, such as `~/Desktop/MacAgentDemo`.
-- MacAgent re-plans with the answer and shows the normal preview.
-
-### 8. Validate Voice Input
-
-Click `Speak`, say:
-
-```text
-Open Safari.
-```
-
-Click `Stop`.
-
-Expected behavior:
-
-- macOS may ask for microphone permission.
-- The transcript appears in the command box.
-- You can edit the transcript before clicking `Preview` or `Plan`.
-
-### 9. Watch Responsiveness
-
-During zip creation and DOCX conversion, the popover should keep showing the spinner, latest status, and log updates. If the spinner stops for a long time or the popover cannot be interacted with, note the command, folder size, and current log line.
-
-## Final Smoke Test
-
-Before treating the prototype as complete, run this from a fresh checkout:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift build --disable-sandbox
-env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox \
-  -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
-  -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks \
-  -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib
-env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable-sandbox MacAgent
-```
-
-Then dry-run the file, DOCX, Hacker News, app, URL, clarification, and voice flows. Run zip, Hacker News, app opening, and URL opening for real. Run DOCX conversion for real if Microsoft Word permissions are available.
+Coverage includes strict plan decoding, tool registry prompt generation, app allowlisting, URL validation, clarification handling, transcription fixtures, whitelist rules, dry-run behavior, zip integration, injected DOCX conversion, and Hacker News Markdown generation.
+
+## Manual Smoke Test
+
+1. Launch Sonny from SwiftPM and click the `Sonny` menu-bar item.
+2. Typed dry run and real run:
+   - `Find the 3 largest files in ~/Desktop/MacAgentDemo and zip them.`
+   - `Convert all .docx to .pdf in ~/Documents/MacAgentDocs.`
+   - `Open Hacker News, grab the top 5 headlines, save to a Markdown file.`
+   - `Open Safari.`
+   - `Open https://github.com.`
+3. Press Enter from the command field to preview typed commands in dry run or execute them when dry run is off.
+4. Try an incomplete request, such as `Find the 3 largest files and zip them.`, then answer Sonny's clarification.
+5. Click `Speak`, say `Open Safari`, click `Stop`, and confirm Sonny transcribes and acts without another manual execute click.
+6. Use generated result buttons such as reveal zip, open Markdown, reveal Markdown, or reveal PDFs.
 
 ## Architecture
 
 - `MacAgent`: AppKit status item plus SwiftUI popover.
-- `MacAgentCore`: planner, safety validation, action previews, executors, and tests.
-- `OpenAIPlanner`: calls the Responses API with structured JSON output.
-- `OpenAITranscriber`: calls the audio transcription API for push-to-talk voice input.
-- `ToolRegistry`: describes locally registered tools used to generate the planner prompt.
-- `AgentActionExecutor`: validates a known plan and runs only the supported workflows.
-- `AgentLogStore`: emits plan, validate, preview, confirm, act, observe, and summarize events for the UI.
+- `MacAgentCore`: planner schema, tool registry, safety validation, previews, executors, and tests.
+- `OpenAIPlanner`: Responses API structured JSON planner.
+- `OpenAITranscriber`: audio transcription client.
+- `AgentActionExecutor`: validates and executes only registered workflows.
+- `AgentLogStore`: realtime plan, validate, preview, confirm, act, observe, and summarize events.

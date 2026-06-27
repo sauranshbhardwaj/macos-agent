@@ -175,6 +175,19 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func openAppPreviewSupportsMusicApps() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let spotify = try executor.preview(plan: openAppPlan(appName: "Spotify"))
+        let appleMusic = try executor.preview(plan: openAppPlan(appName: "Music"))
+
+        #expect(spotify.first?.opens == ["Spotify"])
+        #expect(appleMusic.first?.opens == ["Apple Music"])
+    }
+
+    @Test
     func openAppRejectsUnknownApp() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

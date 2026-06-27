@@ -102,11 +102,11 @@ public struct ToolRegistry: Equatable, Sendable {
         AgentTool(
             operation: .openApp,
             name: "Open allowlisted Mac app",
-            description: "Open an app from the local allowlist by human app name.",
+            description: "Open an app from the local allowlist by human app name. Supported apps: \(MacAppCatalog.default.displayList).",
             requiredFields: ["appName"],
             sideEffects: ["open app"],
             dryRunBehavior: "Show the allowlisted app that would open.",
-            examples: ["Open Safari", "Open VS Code", "Launch Notes"]
+            examples: ["Open Safari", "Open Spotify", "Launch Apple Music"]
         ),
         AgentTool(
             operation: .openURL,

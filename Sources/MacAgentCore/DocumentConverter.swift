@@ -150,7 +150,7 @@ public struct MockDocumentConverter: DocumentConverting {
             let markdown = """
             Mock PDF placeholder
             Source DOCX: \(record.sourceURL.path)
-            Created by MacAgent because Microsoft Word was unavailable and MAC_AGENT_MOCK_DOCX=1 was set.
+            Created by Sonny because Microsoft Word was unavailable and MAC_AGENT_MOCK_DOCX=1 was set.
             """
             do {
                 try markdown.data(using: .utf8)?.write(to: record.destinationURL, options: .atomic)

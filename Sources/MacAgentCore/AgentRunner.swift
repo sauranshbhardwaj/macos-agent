@@ -32,8 +32,11 @@ public final class AgentRunner {
         return preparedRun
     }
 
-    public func execute(_ preparedRun: PreparedAgentRun) async throws -> AgentRunResult {
-        logStore.append(.confirm, "User confirmed execution")
+    public func execute(
+        _ preparedRun: PreparedAgentRun,
+        confirmationMessage: String = "Execution approved"
+    ) async throws -> AgentRunResult {
+        logStore.append(.confirm, confirmationMessage)
         return try await executor.execute(plan: preparedRun.plan) { phase, message in
             self.logStore.append(phase, message)
         }

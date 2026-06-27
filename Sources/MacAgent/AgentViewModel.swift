@@ -11,7 +11,6 @@ final class AgentViewModel: ObservableObject {
     @Published var previews: [ActionPreview] = []
     @Published var finalSummary: String = ""
     @Published var errorMessage: String?
-    @Published var showConfirmation: Bool = false
     @Published var clarificationQuestion: String?
     @Published var clarificationAnswer: String = ""
     @Published var suggestions: [RunSuggestion] = []
@@ -26,6 +25,7 @@ final class AgentViewModel: ObservableObject {
     private var runner: AgentRunner?
     private var currentTask: Task<Void, Never>?
     private let audioRecorder = AudioCommandRecorder()
+    private var clarificationAutoExecute = false
 
     var hasAPIKey: Bool {
         !(ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
@@ -42,7 +42,7 @@ final class AgentViewModel: ObservableObject {
     }
 
     var setupStatus: String {
-        hasAPIKey ? "OpenAI ready - \(modelName); voice - \(transcriptionModelName)" : "Missing OPENAI_API_KEY"
+        hasAPIKey ? "Ready - \(modelName); voice - \(transcriptionModelName)" : "Missing OPENAI_API_KEY"
     }
 
     var canSubmit: Bool {
@@ -71,33 +71,25 @@ final class AgentViewModel: ObservableObject {
         isRecordingVoice ? "stop.circle" : "mic"
     }
 
-    var primaryButtonTitle: String {
-        dryRun ? "Preview" : "Plan"
-    }
+    var primaryButtonTitle: String { dryRun ? "Preview" : "Run" }
 
-    var primaryButtonIcon: String {
-        dryRun ? "eye" : "play"
-    }
+    var primaryButtonIcon: String { dryRun ? "eye" : "play" }
 
-    var confirmationItems: [String] {
-        preparedRun?.sideEffects ?? []
-    }
-
-    func start() {
+    func start(autoExecute: Bool = false) {
         guard canSubmit else {
             if !hasAPIKey {
-                errorMessage = "OPENAI_API_KEY is not set. Export it before launching MacAgent, then relaunch the app."
+                errorMessage = "OPENAI_API_KEY is not set. Export it before launching Sonny, then relaunch the app."
             }
             return
         }
 
         currentTask?.cancel()
         currentTask = Task {
-            await performStart()
+            await performStart(autoExecute: autoExecute)
         }
     }
 
-    private func performStart() async {
+    private func performStart(autoExecute: Bool) async {
         isRunning = true
         errorMessage = nil
         finalSummary = ""
@@ -107,7 +99,6 @@ final class AgentViewModel: ObservableObject {
         clarificationQuestion = nil
         clarificationAnswer = ""
         preparedRun = nil
-        showConfirmation = false
         stepStatuses = [:]
 
         defer {
@@ -128,6 +119,7 @@ final class AgentViewModel: ObservableObject {
 
             if let question = prepared.clarificationQuestion {
                 clarificationQuestion = question
+                clarificationAutoExecute = autoExecute || !dryRun
                 finalSummary = "Clarification needed before I can act."
                 logStore.append(.summarize, "Clarification needed: \(question)")
                 return
@@ -138,47 +130,14 @@ final class AgentViewModel: ObservableObject {
                 finalSummary = "Dry run complete. No files were written, no apps were opened, and no documents were converted."
                 logStore.append(.summarize, finalSummary)
             } else {
-                showConfirmation = true
+                let result = try await executePreparedRun(
+                    preparedRun: prepared,
+                    runner: runner,
+                    confirmationMessage: autoExecute ? "Voice command auto-approved execution" : "Typed command auto-approved execution"
+                )
+                finalSummary = result.summary
+                suggestions = result.suggestions
             }
-        } catch is CancellationError {
-            markAllSteps(.canceled)
-            finalSummary = "Canceled."
-            logStore.append(.summarize, "Canceled by user")
-        } catch {
-            markAllSteps(.failed)
-            errorMessage = error.localizedDescription
-            logStore.append(.summarize, "Stopped: \(error.localizedDescription)")
-        }
-    }
-
-    func executeConfirmed() {
-        guard let preparedRun, let runner else {
-            return
-        }
-
-        currentTask?.cancel()
-        currentTask = Task {
-            await performExecuteConfirmed(preparedRun: preparedRun, runner: runner)
-        }
-    }
-
-    private func performExecuteConfirmed(preparedRun: PreparedAgentRun, runner: AgentRunner) async {
-        isRunning = true
-        errorMessage = nil
-        showConfirmation = false
-        finalSummary = ""
-
-        defer {
-            isRunning = false
-            currentTask = nil
-        }
-
-        do {
-            markAllSteps(.running)
-            let result = try await runner.execute(preparedRun)
-            finalSummary = result.summary
-            suggestions = result.suggestions
-            markAllSteps(.complete)
         } catch is CancellationError {
             markAllSteps(.canceled)
             finalSummary = "Canceled."
@@ -192,7 +151,6 @@ final class AgentViewModel: ObservableObject {
 
     func cancelCurrentRun() {
         currentTask?.cancel()
-        showConfirmation = false
     }
 
     func submitClarification() {
@@ -212,9 +170,11 @@ final class AgentViewModel: ObservableObject {
         Clarification question: \(question)
         Clarification answer: \(answer)
         """
+        let shouldAutoExecute = clarificationAutoExecute
+        clarificationAutoExecute = false
         clarificationQuestion = nil
         clarificationAnswer = ""
-        start()
+        start(autoExecute: shouldAutoExecute)
     }
 
     func toggleVoiceRecording() {
@@ -251,9 +211,9 @@ final class AgentViewModel: ObservableObject {
         previews = []
         finalSummary = ""
         errorMessage = nil
-        showConfirmation = false
         clarificationQuestion = nil
         clarificationAnswer = ""
+        clarificationAutoExecute = false
         suggestions = []
         stepStatuses = [:]
         voiceTranscript = ""
@@ -267,7 +227,7 @@ final class AgentViewModel: ObservableObject {
     private func startVoiceRecording() {
         guard canUseVoice else {
             if !hasAPIKey {
-                errorMessage = "OPENAI_API_KEY is not set. Export it before launching MacAgent, then relaunch the app."
+                errorMessage = "OPENAI_API_KEY is not set. Export it before launching Sonny, then relaunch the app."
             }
             return
         }
@@ -309,7 +269,6 @@ final class AgentViewModel: ObservableObject {
             errorMessage = nil
             logStore.append(.act, "Transcribing voice command")
             defer {
-                isTranscribingVoice = false
                 try? FileManager.default.removeItem(at: audioURL)
             }
 
@@ -318,13 +277,28 @@ final class AgentViewModel: ObservableObject {
                 let result = try await transcriber.transcribe(audioFileURL: audioURL)
                 command = result.text
                 voiceTranscript = result.text
-                finalSummary = "Transcript ready. Review or edit it, then preview the plan."
-                logStore.append(.observe, "Transcript ready")
+                dryRun = false
+                finalSummary = ""
+                isTranscribingVoice = false
+                logStore.append(.observe, "Transcript ready. Sonny will act now.")
+                start(autoExecute: true)
             } catch {
+                isTranscribingVoice = false
                 errorMessage = error.localizedDescription
                 logStore.append(.summarize, "Transcription failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    private func executePreparedRun(
+        preparedRun: PreparedAgentRun,
+        runner: AgentRunner,
+        confirmationMessage: String
+    ) async throws -> AgentRunResult {
+        markAllSteps(.running)
+        let result = try await runner.execute(preparedRun, confirmationMessage: confirmationMessage)
+        markAllSteps(.complete)
+        return result
     }
 
     private func initializeStepStatuses(for plan: AgentPlan) {
