@@ -1,0 +1,124 @@
+import ApplicationServices
+import AVFoundation
+import CoreGraphics
+import Foundation
+
+public enum PermissionReadinessState: String, Codable, Equatable, Sendable {
+    case ready
+    case needsAction
+    case unknown
+
+    public var displayName: String {
+        switch self {
+        case .ready:
+            return "Ready"
+        case .needsAction:
+            return "Needs action"
+        case .unknown:
+            return "Check when used"
+        }
+    }
+}
+
+public struct PermissionReadinessItem: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var state: PermissionReadinessState
+    public var detail: String
+
+    public init(id: String, title: String, state: PermissionReadinessState, detail: String) {
+        self.id = id
+        self.title = title
+        self.state = state
+        self.detail = detail
+    }
+}
+
+public struct PermissionReadinessService: Sendable {
+    public init() {}
+
+    public func currentStatus(hasAPIKey: Bool, hotKeyReady: Bool) -> [PermissionReadinessItem] {
+        [
+            PermissionReadinessItem(
+                id: "openai",
+                title: "OpenAI",
+                state: hasAPIKey ? .ready : .needsAction,
+                detail: hasAPIKey ? "OPENAI_API_KEY is set." : "Export OPENAI_API_KEY before launching Sonny."
+            ),
+            microphoneStatus(),
+            PermissionReadinessItem(
+                id: "hotkey",
+                title: "Voice hotkey",
+                state: hotKeyReady ? .ready : .needsAction,
+                detail: hotKeyReady ? "Control-Option-Space is registered." : "Another app is using Control-Option-Space."
+            ),
+            PermissionReadinessItem(
+                id: "desktop-documents",
+                title: "Desktop/Documents",
+                state: .unknown,
+                detail: "Sonny validates paths first; macOS may ask the launcher for file access when used."
+            ),
+            PermissionReadinessItem(
+                id: "finder-automation",
+                title: "Finder automation",
+                state: .unknown,
+                detail: "Finder context may trigger an Automation prompt the first time it reads selection."
+            ),
+            PermissionReadinessItem(
+                id: "word-automation",
+                title: "Microsoft Word automation",
+                state: .unknown,
+                detail: "DOCX conversion may trigger an Automation prompt when Word is controlled."
+            ),
+            PermissionReadinessItem(
+                id: "accessibility",
+                title: "Accessibility",
+                state: AXIsProcessTrusted() ? .ready : .unknown,
+                detail: AXIsProcessTrusted()
+                    ? "Accessibility is trusted for the current process."
+                    : "Not required yet; future UI-control tools would need Accessibility."
+            ),
+            PermissionReadinessItem(
+                id: "screen-recording",
+                title: "Screen Recording",
+                state: CGPreflightScreenCaptureAccess() ? .ready : .unknown,
+                detail: CGPreflightScreenCaptureAccess()
+                    ? "Screen Recording is available."
+                    : "Not required yet; future screen-aware tools would need Screen Recording."
+            )
+        ]
+    }
+
+    private func microphoneStatus() -> PermissionReadinessItem {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return PermissionReadinessItem(
+                id: "microphone",
+                title: "Microphone",
+                state: .ready,
+                detail: "Voice input is authorized."
+            )
+        case .denied, .restricted:
+            return PermissionReadinessItem(
+                id: "microphone",
+                title: "Microphone",
+                state: .needsAction,
+                detail: "Enable microphone access for the launcher in System Settings."
+            )
+        case .notDetermined:
+            return PermissionReadinessItem(
+                id: "microphone",
+                title: "Microphone",
+                state: .unknown,
+                detail: "Sonny will ask for microphone access the first time you speak."
+            )
+        @unknown default:
+            return PermissionReadinessItem(
+                id: "microphone",
+                title: "Microphone",
+                state: .unknown,
+                detail: "Microphone status is unknown."
+            )
+        }
+    }
+}

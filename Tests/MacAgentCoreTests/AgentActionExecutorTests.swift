@@ -270,10 +270,14 @@ struct AgentActionExecutorTests {
     }
 
     @Test
-    func mixedWorkflowPlanIsRejected() throws {
+    func mixedWorkflowPlanExecutesAsChain() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let executor = makeExecutor(root: root)
+        try write("small", to: root.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: root.appendingPathComponent("large.txt"))
+        let output = root.appendingPathComponent("largest.zip")
+        let appOpener = RecordingAppOpener()
+        let executor = makeExecutor(root: root, appOpener: appOpener)
         let plan = AgentPlan(
             summary: "Zip and open app.",
             requiresConfirmation: true,
@@ -286,6 +290,14 @@ struct AgentActionExecutorTests {
                     count: 3
                 ),
                 AgentStep(
+                    id: "zip",
+                    operation: .createZip,
+                    description: "Zip files",
+                    inputPath: root.path,
+                    outputPath: output.path,
+                    count: 3
+                ),
+                AgentStep(
                     id: "open",
                     operation: .openApp,
                     description: "Open Safari",
@@ -294,9 +306,191 @@ struct AgentActionExecutorTests {
             ]
         )
 
-        #expect(throws: AgentExecutionError.invalidPlan("A plan must contain exactly one supported workflow.")) {
-            try executor.preview(plan: plan)
-        }
+        let result = try await executor.execute(plan: plan) { _, _ in }
+
+        #expect(FileManager.default.fileExists(atPath: output.path))
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(result.summary.contains("Created largest.zip"))
+        #expect(result.summary.contains("Opened Safari."))
+    }
+
+    @Test
+    func chainPreviewCanRevealFutureGeneratedZip() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("small", to: root.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: root.appendingPathComponent("large.txt"))
+        let executor = makeExecutor(root: root)
+        let plan = AgentPlan(
+            summary: "Zip and reveal.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan",
+                    operation: .scanSelectLargestFiles,
+                    description: "Scan files",
+                    inputPath: root.path,
+                    count: 3
+                ),
+                AgentStep(
+                    id: "zip",
+                    operation: .createZip,
+                    description: "Zip files",
+                    inputPath: root.path,
+                    count: 3
+                ),
+                AgentStep(
+                    id: "reveal",
+                    operation: .revealInFinder,
+                    description: "Reveal generated zip"
+                )
+            ]
+        )
+
+        let preview = try executor.preview(plan: plan)
+
+        #expect(preview.count == 2)
+        #expect(preview[0].writes.first?.contains("largest-files-") == true)
+        #expect(preview[1].title == "Reveal in Finder")
+        #expect(preview[1].details.first == "Reveal \(preview[0].writes[0])")
+        #expect(!FileManager.default.fileExists(atPath: preview[0].writes[0]))
+    }
+
+    @Test
+    func finderSelectionCanSupplySelectedFolderContext() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("small", to: root.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: root.appendingPathComponent("large.txt"))
+        let executor = makeExecutor(
+            root: root,
+            finderContextReader: FakeFinderContextReader(selection: [root])
+        )
+        let plan = AgentPlan(
+            summary: "Zip selected Finder folder.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan",
+                    operation: .scanSelectLargestFiles,
+                    description: "Scan selected folder",
+                    count: 3,
+                    contextSource: .finderSelection
+                ),
+                AgentStep(
+                    id: "zip",
+                    operation: .createZip,
+                    description: "Zip selected folder",
+                    count: 3,
+                    contextSource: .finderSelection
+                )
+            ]
+        )
+
+        let preview = try executor.preview(plan: plan)
+
+        #expect(preview.first?.title == "Zip 2 largest files")
+    }
+
+    @Test
+    func routineCanBeSavedAndRun() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        let appOpener = RecordingAppOpener()
+        let executor = makeExecutor(root: root, appOpener: appOpener, routineStore: routineStore)
+        let savePlan = AgentPlan(
+            summary: "Teach routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "save-routine",
+                    operation: .saveRoutine,
+                    description: "Save routine.",
+                    routineName: "Morning Setup",
+                    routineSteps: [
+                        AgentStep(
+                            id: "open-safari",
+                            operation: .openApp,
+                            description: "Open Safari.",
+                            appName: "Safari"
+                        ),
+                        AgentStep(
+                            id: "open-notes",
+                            operation: .openApp,
+                            description: "Open Notes.",
+                            appName: "Notes"
+                        )
+                    ]
+                )
+            ]
+        )
+        let runPlan = AgentPlan(
+            summary: "Run routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "run-routine",
+                    operation: .runRoutine,
+                    description: "Run routine.",
+                    routineName: "Morning Setup"
+                )
+            ]
+        )
+
+        _ = try await executor.execute(plan: savePlan) { _, _ in }
+        let result = try await executor.execute(plan: runPlan) { _, _ in }
+
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari", "com.apple.Notes"])
+        #expect(result.summary.contains("Ran routine Morning Setup."))
+    }
+
+    @Test
+    func workspaceCanBeSavedAndOpened() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspaceStore = WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+        let appOpener = RecordingAppOpener()
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(
+            root: root,
+            browserOpener: browserOpener,
+            appOpener: appOpener,
+            workspaceStore: workspaceStore
+        )
+        let createPlan = AgentPlan(
+            summary: "Create workspace.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "create-workspace",
+                    operation: .createWorkspace,
+                    description: "Create workspace.",
+                    workspaceName: "Research",
+                    workspaceApps: ["Safari"],
+                    workspaceURLs: ["https://github.com"]
+                )
+            ]
+        )
+        let openPlan = AgentPlan(
+            summary: "Open workspace.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-workspace",
+                    operation: .openWorkspace,
+                    description: "Open workspace.",
+                    workspaceName: "Research"
+                )
+            ]
+        )
+
+        _ = try await executor.execute(plan: createPlan) { _, _ in }
+        let result = try await executor.execute(plan: openPlan) { _, _ in }
+
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com"])
+        #expect(result.summary == "Opened workspace Research with 1 app(s) and 1 URL(s).")
     }
 
     private func makeExecutor(
@@ -307,7 +501,10 @@ struct AgentActionExecutorTests {
         hackerNewsFetcher: HackerNewsFetching = StaticHackerNewsFetcher(),
         appCatalog: MacAppCatalog = .default,
         appOpener: AppOpening = NoopAppOpener(),
-        mediaOpener: MediaOpening = FakeMediaOpener()
+        mediaOpener: MediaOpening = FakeMediaOpener(),
+        finderContextReader: FinderContextReading = FakeFinderContextReader(selection: []),
+        routineStore: RoutineStore? = nil,
+        workspaceStore: WorkspaceStore? = nil
     ) -> AgentActionExecutor {
         AgentActionExecutor(
             whitelist: PathWhitelist(roots: [root]),
@@ -317,7 +514,10 @@ struct AgentActionExecutorTests {
             hackerNewsFetcher: hackerNewsFetcher,
             appCatalog: appCatalog,
             appOpener: appOpener,
-            mediaOpener: mediaOpener
+            mediaOpener: mediaOpener,
+            finderContextReader: finderContextReader,
+            routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
+            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
         )
     }
 
@@ -488,8 +688,26 @@ private struct NoopBrowserOpener: BrowserOpening {
     func open(_ url: URL) async throws {}
 }
 
+@MainActor
+private final class RecordingBrowserOpener: BrowserOpening {
+    private(set) var openedURLs: [URL] = []
+
+    func open(_ url: URL) async throws {
+        openedURLs.append(url)
+    }
+}
+
 private struct NoopAppOpener: AppOpening {
     func open(bundleIdentifier: String) async throws {}
+}
+
+@MainActor
+private final class RecordingAppOpener: AppOpening {
+    private(set) var openedBundleIDs: [String] = []
+
+    func open(bundleIdentifier: String) async throws {
+        openedBundleIDs.append(bundleIdentifier)
+    }
 }
 
 @MainActor
@@ -499,6 +717,17 @@ private final class FakeMediaOpener: MediaOpening {
     func open(_ request: MediaPlaybackRequest) async throws -> String {
         requests.append(request)
         return "Opened \(request.displayTitle) in \(request.provider.displayName)."
+    }
+}
+
+private struct FakeFinderContextReader: FinderContextReading {
+    var selection: [URL]
+
+    func selectedItems() throws -> [URL] {
+        guard !selection.isEmpty else {
+            throw FinderContextError.noSelection
+        }
+        return selection
     }
 }
 

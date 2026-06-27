@@ -25,6 +25,12 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var mediaProvider: MediaProvider?
     public var mediaTitle: String?
     public var mediaArtist: String?
+    public var contextSource: FinderContextSource?
+    public var routineName: String?
+    public var routineSteps: [AgentStep]?
+    public var workspaceName: String?
+    public var workspaceApps: [String]?
+    public var workspaceURLs: [String]?
 
     public init(
         id: String,
@@ -38,7 +44,13 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         question: String? = nil,
         mediaProvider: MediaProvider? = nil,
         mediaTitle: String? = nil,
-        mediaArtist: String? = nil
+        mediaArtist: String? = nil,
+        contextSource: FinderContextSource? = nil,
+        routineName: String? = nil,
+        routineSteps: [AgentStep]? = nil,
+        workspaceName: String? = nil,
+        workspaceApps: [String]? = nil,
+        workspaceURLs: [String]? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -52,6 +64,12 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.mediaProvider = mediaProvider
         self.mediaTitle = mediaTitle
         self.mediaArtist = mediaArtist
+        self.contextSource = contextSource
+        self.routineName = routineName
+        self.routineSteps = routineSteps
+        self.workspaceName = workspaceName
+        self.workspaceApps = workspaceApps
+        self.workspaceURLs = workspaceURLs
     }
 }
 
@@ -66,6 +84,13 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case openApp = "open_app"
     case openURL = "open_url"
     case playMedia = "play_media"
+    case getFinderSelection = "get_finder_selection"
+    case revealInFinder = "reveal_in_finder"
+    case showPermissionReadiness = "show_permission_readiness"
+    case saveRoutine = "save_routine"
+    case runRoutine = "run_routine"
+    case createWorkspace = "create_workspace"
+    case openWorkspace = "open_workspace"
     case clarify
     case unsupported
 }
@@ -123,7 +148,13 @@ public enum AgentPlanDecoder {
         "question",
         "mediaProvider",
         "mediaTitle",
-        "mediaArtist"
+        "mediaArtist",
+        "contextSource",
+        "routineName",
+        "routineSteps",
+        "workspaceName",
+        "workspaceApps",
+        "workspaceURLs"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -141,9 +172,7 @@ public enum AgentPlanDecoder {
         }
 
         for step in steps {
-            for key in step.keys where !stepKeys.contains(key) {
-                throw AgentPlanDecodingError.unexpectedStepKey(key)
-            }
+            try validateStepKeys(step)
         }
 
         return try JSONDecoder().decode(AgentPlan.self, from: data)
@@ -155,9 +184,44 @@ public enum AgentPlanDecoder {
         }
         return try decodeStrict(from: data)
     }
+
+    private static func validateStepKeys(_ step: [String: Any]) throws {
+        for key in step.keys where !stepKeys.contains(key) {
+            throw AgentPlanDecodingError.unexpectedStepKey(key)
+        }
+
+        guard let routineSteps = step["routineSteps"] as? [[String: Any]] else {
+            return
+        }
+
+        for nestedStep in routineSteps {
+            try validateStepKeys(nestedStep)
+        }
+    }
 }
 
 public enum AgentPlanSchema {
+    private static let stepRequiredKeys = [
+        "id",
+        "operation",
+        "description",
+        "inputPath",
+        "outputPath",
+        "count",
+        "targetURL",
+        "appName",
+        "question",
+        "mediaProvider",
+        "mediaTitle",
+        "mediaArtist",
+        "contextSource",
+        "routineName",
+        "routineSteps",
+        "workspaceName",
+        "workspaceApps",
+        "workspaceURLs"
+    ]
+
     public static func responseFormat() -> [String: Any] {
         [
             "type": "json_schema",
@@ -179,71 +243,101 @@ public enum AgentPlanSchema {
                     "steps": [
                         "type": "array",
                         "minItems": 1,
-                        "items": [
-                            "type": "object",
-                            "additionalProperties": false,
-                            "required": [
-                                "id",
-                                "operation",
-                                "description",
-                                "inputPath",
-                                "outputPath",
-                                "count",
-                                "targetURL",
-                                "appName",
-                                "question",
-                                "mediaProvider",
-                                "mediaTitle",
-                                "mediaArtist"
-                            ],
-                            "properties": [
-                                "id": ["type": "string"],
-                                "operation": [
-                                    "type": "string",
-                                    "enum": AgentOperation.allCases.map(\.rawValue)
-                                ],
-                                "description": ["type": "string"],
-                                "inputPath": [
-                                    "type": ["string", "null"],
-                                    "description": "Folder or file path supplied by the user, or null."
-                                ],
-                                "outputPath": [
-                                    "type": ["string", "null"],
-                                    "description": "Destination folder or file path, or null."
-                                ],
-                                "count": [
-                                    "type": ["integer", "null"],
-                                    "description": "Requested count, such as top 3 files or top 5 headlines."
-                                ],
-                                "targetURL": [
-                                    "type": ["string", "null"],
-                                    "description": "URL for browser/fetch actions or exact provider result URI for media actions, or null."
-                                ],
-                                "appName": [
-                                    "type": ["string", "null"],
-                                    "description": "Human app name for open_app actions, or null."
-                                ],
-                                "question": [
-                                    "type": ["string", "null"],
-                                    "description": "Clarifying question for clarify actions, or null."
-                                ],
-                                "mediaProvider": [
-                                    "type": ["string", "null"],
-                                    "enum": (MediaProvider.allCases.map(\.rawValue) as [Any]) + [NSNull()],
-                                    "description": "Music provider for media-opening actions, or null."
-                                ],
-                                "mediaTitle": [
-                                    "type": ["string", "null"],
-                                    "description": "Song or album title for media-opening actions, or null."
-                                ],
-                                "mediaArtist": [
-                                    "type": ["string", "null"],
-                                    "description": "Artist name for media-opening actions when provided by the user, or null."
-                                ]
-                            ]
-                        ]
+                        "items": stepSchema(allowsRoutineSteps: true)
                     ]
                 ]
+            ]
+        ]
+    }
+
+    private static func stepSchema(allowsRoutineSteps: Bool) -> [String: Any] {
+        var properties = baseStepProperties()
+        properties["routineSteps"] = allowsRoutineSteps
+            ? [
+                "type": ["array", "null"],
+                "description": "Nested executable steps for save_routine, or null.",
+                "items": stepSchema(allowsRoutineSteps: false)
+            ]
+            : [
+                "type": "null",
+                "description": "Nested routines are not allowed."
+            ]
+
+        return [
+            "type": "object",
+            "additionalProperties": false,
+            "required": stepRequiredKeys,
+            "properties": properties
+        ]
+    }
+
+    private static func baseStepProperties() -> [String: Any] {
+        [
+            "id": ["type": "string"],
+            "operation": [
+                "type": "string",
+                "enum": AgentOperation.allCases.map(\.rawValue)
+            ],
+            "description": ["type": "string"],
+            "inputPath": [
+                "type": ["string", "null"],
+                "description": "Folder or file path supplied by the user, or null."
+            ],
+            "outputPath": [
+                "type": ["string", "null"],
+                "description": "Destination folder or file path, reveal target path, or null."
+            ],
+            "count": [
+                "type": ["integer", "null"],
+                "description": "Requested count, such as top 3 files or top 5 headlines."
+            ],
+            "targetURL": [
+                "type": ["string", "null"],
+                "description": "URL for browser/fetch actions or exact provider result URI for media actions, or null."
+            ],
+            "appName": [
+                "type": ["string", "null"],
+                "description": "Human app name for open_app actions, or null."
+            ],
+            "question": [
+                "type": ["string", "null"],
+                "description": "Clarifying question for clarify actions, or null."
+            ],
+            "mediaProvider": [
+                "type": ["string", "null"],
+                "enum": (MediaProvider.allCases.map(\.rawValue) as [Any]) + [NSNull()],
+                "description": "Music provider for media-opening actions, or null."
+            ],
+            "mediaTitle": [
+                "type": ["string", "null"],
+                "description": "Song or album title for media-opening actions, or null."
+            ],
+            "mediaArtist": [
+                "type": ["string", "null"],
+                "description": "Artist name for media-opening actions when provided by the user, or null."
+            ],
+            "contextSource": [
+                "type": ["string", "null"],
+                "enum": ([FinderContextSource.finderSelection.rawValue] as [Any]) + [NSNull()],
+                "description": "Use finder_selection when the user refers to selected Finder items, or null."
+            ],
+            "routineName": [
+                "type": ["string", "null"],
+                "description": "Routine name for save_routine or run_routine, or null."
+            ],
+            "workspaceName": [
+                "type": ["string", "null"],
+                "description": "Workspace name for create_workspace or open_workspace, or null."
+            ],
+            "workspaceApps": [
+                "type": ["array", "null"],
+                "description": "App names for create_workspace, or null.",
+                "items": ["type": "string"]
+            ],
+            "workspaceURLs": [
+                "type": ["array", "null"],
+                "description": "HTTP/HTTPS URLs for create_workspace, or null.",
+                "items": ["type": "string"]
             ]
         ]
     }

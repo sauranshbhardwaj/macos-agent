@@ -21,6 +21,8 @@ final class AgentViewModel: ObservableObject {
     @Published var isTranscribingVoice: Bool = false
     @Published var voiceHotKeyStatus: String = "Hold Ctrl-Opt-Space"
     @Published var voiceHotKeyReady: Bool = true
+    @Published var showPermissionPanel: Bool = false
+    @Published var permissionItems: [PermissionReadinessItem] = []
 
     let logStore = AgentLogStore()
 
@@ -28,6 +30,7 @@ final class AgentViewModel: ObservableObject {
     private var runner: AgentRunner?
     private var currentTask: Task<Void, Never>?
     private let audioRecorder = AudioCommandRecorder()
+    private let permissionReadinessService = PermissionReadinessService()
     private var clarificationAutoExecute = false
     private var isPushToTalkHotKeyDown = false
 
@@ -229,6 +232,19 @@ final class AgentViewModel: ObservableObject {
         voiceHotKeyReady = false
         voiceHotKeyStatus = "Hotkey unavailable"
         errorMessage = message
+        refreshPermissions()
+    }
+
+    func refreshPermissions() {
+        permissionItems = permissionReadinessService.currentStatus(
+            hasAPIKey: hasAPIKey,
+            hotKeyReady: voiceHotKeyReady
+        )
+    }
+
+    func togglePermissionPanel() {
+        refreshPermissions()
+        showPermissionPanel.toggle()
     }
 
     func runSuggestion(_ suggestion: RunSuggestion) {
@@ -267,6 +283,8 @@ final class AgentViewModel: ObservableObject {
         isRecordingVoice = false
         isTranscribingVoice = false
         isPushToTalkHotKeyDown = false
+        showPermissionPanel = false
+        refreshPermissions()
         preparedRun = nil
         runner = nil
         logStore.reset()

@@ -121,6 +121,14 @@ public final class OpenAIPlanner: Planning {
     - For opening a general website, produce one open_url step with targetURL using http or https.
     - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
     - If a song or album request is missing the provider or title, ask a clarification question.
+    - For Finder context phrases such as "selected folder", "selected files", "this Finder selection", or "the folder selected in Finder", set contextSource to finder_selection and leave inputPath null.
+    - For "reveal the result/zip/markdown/PDFs in Finder" after a writing step, add reveal_in_finder with outputPath null so the executor can reveal the previous produced artifact.
+    - For permission/readiness requests, produce one show_permission_readiness step.
+    - For teaching a routine, produce one save_routine step with routineName and routineSteps containing only registered non-routine steps. Do not put save_routine, run_routine, clarify, or unsupported inside routineSteps.
+    - For running a saved routine, produce one run_routine step with routineName.
+    - For creating a workspace, produce one create_workspace step with workspaceName, workspaceApps, and workspaceURLs. Use only explicitly named apps/URLs. If none are provided, ask a clarification question.
+    - For opening a saved workspace, produce one open_workspace step with workspaceName.
+    - You may produce multi-step chained plans when the user asks for multiple supported actions. Keep steps in execution order.
     - For any unsupported request, return one unsupported step and explain why.
     - Never include shell commands, AppleScript, or code.
     """

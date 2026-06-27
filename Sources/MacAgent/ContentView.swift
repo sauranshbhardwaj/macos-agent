@@ -9,6 +9,9 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             SetupStatusPanel(viewModel: viewModel)
+            if viewModel.showPermissionPanel {
+                PermissionReadinessPanel(items: viewModel.permissionItems)
+            }
             commandInput
             controls
 
@@ -36,6 +39,7 @@ struct ContentView: View {
         .foregroundStyle(SonnyTheme.text)
         .onAppear {
             commandFocused = true
+            viewModel.refreshPermissions()
         }
     }
 
@@ -167,9 +171,65 @@ private struct SetupStatusPanel: View {
                 tone: viewModel.voiceHotKeyReady ? .neutral : .warning
             )
             Spacer()
-            StatusChip(title: "Desktop, Documents", systemImage: "folder", tone: .neutral)
+            Button {
+                viewModel.togglePermissionPanel()
+            } label: {
+                Label("Readiness", systemImage: "checklist.checked")
+            }
+            .buttonStyle(SonnyButtonStyle(tone: .secondary))
+            .help("Show permission readiness")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PermissionReadinessPanel: View {
+    let items: [PermissionReadinessItem]
+
+    var body: some View {
+        Panel(title: "Readiness", systemImage: "checklist.checked") {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(items) { item in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: icon(for: item.state))
+                            .font(.caption)
+                            .foregroundStyle(color(for: item.state))
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(SonnyTheme.text)
+                            Text(item.detail)
+                                .font(.caption)
+                                .foregroundStyle(SonnyTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func icon(for state: PermissionReadinessState) -> String {
+        switch state {
+        case .ready:
+            return "checkmark.circle"
+        case .needsAction:
+            return "exclamationmark.triangle"
+        case .unknown:
+            return "questionmark.circle"
+        }
+    }
+
+    private func color(for state: PermissionReadinessState) -> Color {
+        switch state {
+        case .ready:
+            return SonnyTheme.accent
+        case .needsAction:
+            return SonnyTheme.warning
+        case .unknown:
+            return SonnyTheme.muted
+        }
     }
 }
 
