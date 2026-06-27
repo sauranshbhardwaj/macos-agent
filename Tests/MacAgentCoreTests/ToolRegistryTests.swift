@@ -11,9 +11,12 @@ struct ToolRegistryTests {
 
         #expect(operations.contains(.openApp))
         #expect(operations.contains(.openURL))
+        #expect(operations.contains(.playMedia))
         #expect(operations.contains(.clarify))
         #expect(registry.plannerDescription.contains("open_app"))
         #expect(registry.plannerDescription.contains("open_url"))
+        #expect(registry.plannerDescription.contains("play_media"))
+        #expect(registry.plannerDescription.contains("Open Jimmy Cooks by Drake on Apple Music"))
         #expect(registry.plannerDescription.contains("Spotify"))
         #expect(registry.plannerDescription.contains("Apple Music"))
     }

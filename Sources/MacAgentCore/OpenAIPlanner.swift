@@ -119,6 +119,8 @@ public final class OpenAIPlanner: Planning {
     - For Hacker News headline saving, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
     - For opening an app, produce one open_app step with appName.
     - For opening a general website, produce one open_url step with targetURL using http or https.
+    - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
+    - If a song or album request is missing the provider or title, ask a clarification question.
     - For any unsupported request, return one unsupported step and explain why.
     - Never include shell commands, AppleScript, or code.
     """

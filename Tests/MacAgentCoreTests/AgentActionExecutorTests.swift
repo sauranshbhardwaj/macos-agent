@@ -213,6 +213,51 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func mediaOpenPreviewShowsProviderAndSong() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let appleMusic = try executor.preview(plan: mediaPlan(provider: .appleMusic))
+        let spotify = try executor.preview(plan: mediaPlan(provider: .spotify))
+
+        #expect(appleMusic.first?.opens == ["Apple Music"])
+        #expect(appleMusic.first?.title == "Open Jimmy Cooks by Drake")
+        #expect(appleMusic.first?.details.contains("Opens the best matching Apple Music album result, or Apple Music search if no match is found.") == true)
+        #expect(spotify.first?.opens == ["Spotify"])
+        #expect(spotify.first?.details.contains("Opens Spotify search for the requested song or album.") == true)
+    }
+
+    @Test
+    func mediaOpenExecutionUsesInjectedOpener() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let opener = FakeMediaOpener()
+        let executor = makeExecutor(root: root, mediaOpener: opener)
+
+        let result = try await executor.execute(plan: mediaPlan(provider: .appleMusic)) { _, _ in }
+
+        #expect(result.summary == "Opened Jimmy Cooks by Drake in Apple Music.")
+        #expect(opener.requests == [
+            MediaPlaybackRequest(provider: .appleMusic, title: "Jimmy Cooks", artist: "Drake")
+        ])
+    }
+
+    @Test
+    func mediaOpenRequiresProviderAndTitle() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        #expect(throws: MediaPlaybackError.missingProvider) {
+            try executor.preview(plan: mediaPlan(provider: nil))
+        }
+        #expect(throws: MediaPlaybackError.missingTitle) {
+            try executor.preview(plan: mediaPlan(provider: .appleMusic, title: " "))
+        }
+    }
+
+    @Test
     func clarificationPlanPreparesQuestionWithoutSideEffects() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -261,7 +306,8 @@ struct AgentActionExecutorTests {
         browserOpener: BrowserOpening = NoopBrowserOpener(),
         hackerNewsFetcher: HackerNewsFetching = StaticHackerNewsFetcher(),
         appCatalog: MacAppCatalog = .default,
-        appOpener: AppOpening = NoopAppOpener()
+        appOpener: AppOpening = NoopAppOpener(),
+        mediaOpener: MediaOpening = FakeMediaOpener()
     ) -> AgentActionExecutor {
         AgentActionExecutor(
             whitelist: PathWhitelist(roots: [root]),
@@ -270,7 +316,8 @@ struct AgentActionExecutorTests {
             browserOpener: browserOpener,
             hackerNewsFetcher: hackerNewsFetcher,
             appCatalog: appCatalog,
-            appOpener: appOpener
+            appOpener: appOpener,
+            mediaOpener: mediaOpener
         )
     }
 
@@ -378,6 +425,24 @@ struct AgentActionExecutorTests {
         )
     }
 
+    private func mediaPlan(provider: MediaProvider?, title: String = "Jimmy Cooks") -> AgentPlan {
+        AgentPlan(
+            summary: "Open a song result.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "play-media",
+                    operation: .playMedia,
+                    description: "Open the requested song result.",
+                    targetURL: nil,
+                    mediaProvider: provider,
+                    mediaTitle: title,
+                    mediaArtist: "Drake"
+                )
+            ]
+        )
+    }
+
     private func clarifyPlan() -> AgentPlan {
         AgentPlan(
             summary: "Need clarification.",
@@ -425,6 +490,16 @@ private struct NoopBrowserOpener: BrowserOpening {
 
 private struct NoopAppOpener: AppOpening {
     func open(bundleIdentifier: String) async throws {}
+}
+
+@MainActor
+private final class FakeMediaOpener: MediaOpening {
+    private(set) var requests: [MediaPlaybackRequest] = []
+
+    func open(_ request: MediaPlaybackRequest) async throws -> String {
+        requests.append(request)
+        return "Opened \(request.displayTitle) in \(request.provider.displayName)."
+    }
 }
 
 private struct StaticHackerNewsFetcher: HackerNewsFetching {

@@ -22,6 +22,9 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var targetURL: String?
     public var appName: String?
     public var question: String?
+    public var mediaProvider: MediaProvider?
+    public var mediaTitle: String?
+    public var mediaArtist: String?
 
     public init(
         id: String,
@@ -32,7 +35,10 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         count: Int? = nil,
         targetURL: String? = nil,
         appName: String? = nil,
-        question: String? = nil
+        question: String? = nil,
+        mediaProvider: MediaProvider? = nil,
+        mediaTitle: String? = nil,
+        mediaArtist: String? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -43,6 +49,9 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.targetURL = targetURL
         self.appName = appName
         self.question = question
+        self.mediaProvider = mediaProvider
+        self.mediaTitle = mediaTitle
+        self.mediaArtist = mediaArtist
     }
 }
 
@@ -56,8 +65,23 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case writeMarkdown = "write_markdown"
     case openApp = "open_app"
     case openURL = "open_url"
+    case playMedia = "play_media"
     case clarify
     case unsupported
+}
+
+public enum MediaProvider: String, Codable, CaseIterable, Sendable {
+    case appleMusic = "apple_music"
+    case spotify
+
+    public var displayName: String {
+        switch self {
+        case .appleMusic:
+            return "Apple Music"
+        case .spotify:
+            return "Spotify"
+        }
+    }
 }
 
 public enum AgentPlanDecodingError: Error, Equatable, LocalizedError {
@@ -96,7 +120,10 @@ public enum AgentPlanDecoder {
         "count",
         "targetURL",
         "appName",
-        "question"
+        "question",
+        "mediaProvider",
+        "mediaTitle",
+        "mediaArtist"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -164,7 +191,10 @@ public enum AgentPlanSchema {
                                 "count",
                                 "targetURL",
                                 "appName",
-                                "question"
+                                "question",
+                                "mediaProvider",
+                                "mediaTitle",
+                                "mediaArtist"
                             ],
                             "properties": [
                                 "id": ["type": "string"],
@@ -187,7 +217,7 @@ public enum AgentPlanSchema {
                                 ],
                                 "targetURL": [
                                     "type": ["string", "null"],
-                                    "description": "URL for browser/fetch actions, or null."
+                                    "description": "URL for browser/fetch actions or exact provider result URI for media actions, or null."
                                 ],
                                 "appName": [
                                     "type": ["string", "null"],
@@ -196,6 +226,19 @@ public enum AgentPlanSchema {
                                 "question": [
                                     "type": ["string", "null"],
                                     "description": "Clarifying question for clarify actions, or null."
+                                ],
+                                "mediaProvider": [
+                                    "type": ["string", "null"],
+                                    "enum": (MediaProvider.allCases.map(\.rawValue) as [Any]) + [NSNull()],
+                                    "description": "Music provider for media-opening actions, or null."
+                                ],
+                                "mediaTitle": [
+                                    "type": ["string", "null"],
+                                    "description": "Song or album title for media-opening actions, or null."
+                                ],
+                                "mediaArtist": [
+                                    "type": ["string", "null"],
+                                    "description": "Artist name for media-opening actions when provided by the user, or null."
                                 ]
                             ]
                         ]

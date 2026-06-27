@@ -118,6 +118,18 @@ public struct ToolRegistry: Equatable, Sendable {
             examples: ["Open GitHub", "Open https://gmail.com"]
         ),
         AgentTool(
+            operation: .playMedia,
+            name: "Open music result",
+            description: "Open a requested song or album in Apple Music or Spotify without starting playback. Apple Music opens the best matching catalog album result when found, otherwise search. Spotify opens a supplied Spotify result URI or a Spotify search.",
+            requiredFields: ["mediaProvider", "mediaTitle"],
+            sideEffects: ["open music app"],
+            dryRunBehavior: "Show the provider, title, artist, and result/search behavior without opening an app.",
+            examples: [
+                "Open Jimmy Cooks by Drake on Apple Music",
+                "Open Bad Habit by Steve Lacy on Spotify"
+            ]
+        ),
+        AgentTool(
             operation: .clarify,
             name: "Ask clarification",
             description: "Ask a short question when a required folder, app, count, or output destination is missing or ambiguous.",

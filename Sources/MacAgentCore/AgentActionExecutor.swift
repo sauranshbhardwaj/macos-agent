@@ -52,6 +52,7 @@ public final class AgentActionExecutor {
     private let hackerNewsFetcher: HackerNewsFetching
     private let appCatalog: MacAppCatalog
     private let appOpener: AppOpening
+    private let mediaOpener: MediaOpening
     private let fileManager: FileManager
     private let now: () -> Date
 
@@ -64,6 +65,7 @@ public final class AgentActionExecutor {
         hackerNewsFetcher: HackerNewsFetching = HackerNewsAPIClient(),
         appCatalog: MacAppCatalog = .default,
         appOpener: AppOpening = WorkspaceAppOpener(),
+        mediaOpener: MediaOpening = NativeMediaOpener(),
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
     ) {
@@ -75,6 +77,7 @@ public final class AgentActionExecutor {
         self.hackerNewsFetcher = hackerNewsFetcher
         self.appCatalog = appCatalog
         self.appOpener = appOpener
+        self.mediaOpener = mediaOpener
         self.fileManager = fileManager
         self.now = now
     }
@@ -115,6 +118,8 @@ public final class AgentActionExecutor {
             return [try previewOpenApp(plan)]
         case .openURL:
             return [try previewOpenURL(plan)]
+        case .mediaOpen:
+            return [try previewMediaOpen(plan)]
         }
     }
 
@@ -146,6 +151,9 @@ public final class AgentActionExecutor {
         case .openURL:
             let summary = try await executeOpenURL(resolvedPlan, log: log)
             return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+        case .mediaOpen:
+            let summary = try await executeMediaOpen(resolvedPlan, log: log)
+            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
         }
     }
 
@@ -156,6 +164,7 @@ public final class AgentActionExecutor {
         case hackerNews
         case openApp
         case openURL
+        case mediaOpen
     }
 
     private func workflow(in plan: AgentPlan) throws -> Workflow {
@@ -186,6 +195,8 @@ public final class AgentActionExecutor {
             return .openApp
         case .openURL:
             return .openURL
+        case .playMedia:
+            return .mediaOpen
         case .unsupported:
             throw AgentExecutionError.unsupported("Unsupported operation.")
         }
@@ -393,6 +404,29 @@ public final class AgentActionExecutor {
         return "Opened \(spec.url.absoluteString)."
     }
 
+    private func previewMediaOpen(_ plan: AgentPlan) throws -> ActionPreview {
+        let spec = try mediaSpec(plan)
+        return ActionPreview(
+            title: "Open \(spec.request.displayTitle)",
+            details: [
+                "Provider: \(spec.request.provider.displayName)",
+                spec.behaviorDescription
+            ],
+            opens: [spec.request.provider.displayName]
+        )
+    }
+
+    private func executeMediaOpen(
+        _ plan: AgentPlan,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> String {
+        let spec = try mediaSpec(plan)
+        log(.act, "Opening \(spec.request.provider.displayName) result for \(spec.request.displayTitle)")
+        let summary = try await mediaOpener.open(spec.request)
+        log(.summarize, summary)
+        return summary
+    }
+
     private func largestFileSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
         let spec = try largestFileSpec(plan)
         return [
@@ -500,11 +534,51 @@ public final class AgentActionExecutor {
         var url: URL
     }
 
+    private struct MediaSpec {
+        var request: MediaPlaybackRequest
+        var behaviorDescription: String
+    }
+
     private func urlSpec(_ plan: AgentPlan) throws -> URLSpec {
         guard let step = plan.steps.first(where: { $0.operation == .openURL }) else {
             throw AgentExecutionError.invalidPlan("open_url step is missing.")
         }
         return URLSpec(url: try SafeURL.validateWebURL(step.targetURL))
+    }
+
+    private func mediaSpec(_ plan: AgentPlan) throws -> MediaSpec {
+        guard let step = plan.steps.first(where: { $0.operation == .playMedia }) else {
+            throw AgentExecutionError.invalidPlan("play_media step is missing.")
+        }
+        guard let provider = step.mediaProvider else {
+            throw MediaPlaybackError.missingProvider
+        }
+        guard let rawTitle = step.mediaTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawTitle.isEmpty else {
+            throw MediaPlaybackError.missingTitle
+        }
+
+        let artist = step.mediaArtist?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = MediaPlaybackRequest(
+            provider: provider,
+            title: rawTitle,
+            artist: artist?.isEmpty == false ? artist : nil,
+            mediaURI: step.targetURL
+        )
+
+        let behavior: String
+        switch provider {
+        case .appleMusic:
+            behavior = "Opens the best matching Apple Music album result, or Apple Music search if no match is found."
+        case .spotify:
+            if let mediaURI = request.mediaURI, !mediaURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                behavior = "Opens the supplied Spotify result URI."
+            } else {
+                behavior = "Opens Spotify search for the requested song or album."
+            }
+        }
+
+        return MediaSpec(request: request, behaviorDescription: behavior)
     }
 
     private func hackerNewsSpec(_ plan: AgentPlan) throws -> HackerNewsSpec {

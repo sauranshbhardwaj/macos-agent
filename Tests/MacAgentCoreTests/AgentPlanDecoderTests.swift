@@ -177,6 +177,39 @@ struct AgentPlanDecoderTests {
     }
 
     @Test
+    func decodesMediaOpenPlan() throws {
+        let json = """
+        {
+          "summary": "Open Jimmy Cooks.",
+          "requiresConfirmation": true,
+          "steps": [
+            {
+              "id": "play-media",
+              "operation": "play_media",
+              "description": "Open Jimmy Cooks by Drake in Apple Music.",
+              "inputPath": null,
+              "outputPath": null,
+              "count": null,
+              "targetURL": null,
+              "appName": null,
+              "question": null,
+              "mediaProvider": "apple_music",
+              "mediaTitle": "Jimmy Cooks",
+              "mediaArtist": "Drake"
+            }
+          ]
+        }
+        """
+
+        let plan = try AgentPlanDecoder.decodeStrict(from: json)
+
+        #expect(plan.steps[0].operation == .playMedia)
+        #expect(plan.steps[0].mediaProvider == .appleMusic)
+        #expect(plan.steps[0].mediaTitle == "Jimmy Cooks")
+        #expect(plan.steps[0].mediaArtist == "Drake")
+    }
+
+    @Test
     func parsesResponsesOutputText() throws {
         let response = """
         {
