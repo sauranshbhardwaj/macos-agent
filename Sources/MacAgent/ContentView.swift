@@ -6,57 +6,62 @@ struct ContentView: View {
     @FocusState private var commandFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            SetupStatusPanel(viewModel: viewModel)
-            if viewModel.showPermissionPanel {
-                PermissionReadinessPanel(items: viewModel.permissionItems)
-            }
-            commandInput
-            controls
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+            SonnyTheme.glassShade
+            LinearGradient(
+                colors: [
+                    SonnyTheme.accent.opacity(0.08),
+                    Color.clear,
+                    SonnyTheme.cyan.opacity(0.05)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-            if viewModel.isPreparingVoiceRecording || viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
-                VoiceStatusPanel(viewModel: viewModel)
-            }
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                if viewModel.showPermissionPanel {
+                    SystemStatusPanel(viewModel: viewModel)
+                }
+                commandInput
+                controls
+                SavedItemsPanel(viewModel: viewModel)
 
-            if viewModel.isRunning {
-                BusyPanel(logStore: viewModel.logStore)
-            }
+                if viewModel.isPreparingVoiceRecording || viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
+                    VoiceStatusPanel(viewModel: viewModel)
+                }
 
-            if let error = viewModel.errorMessage {
-                ErrorBanner(message: error)
-            }
+                if viewModel.isRunning {
+                    BusyPanel(logStore: viewModel.logStore)
+                }
 
-            if let question = viewModel.clarificationQuestion {
-                ClarificationPanel(viewModel: viewModel, question: question)
-            }
+                if let error = viewModel.errorMessage {
+                    ErrorBanner(message: error)
+                }
 
-            RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
+                if let question = viewModel.clarificationQuestion {
+                    ClarificationPanel(viewModel: viewModel, question: question)
+                }
+
+                RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
+            }
+            .padding(20)
         }
-        .padding(20)
         .frame(width: 600, height: 740)
-        .background(SonnyTheme.background)
+        .background(.clear)
         .foregroundStyle(SonnyTheme.text)
         .onAppear {
             commandFocused = true
             viewModel.refreshPermissions()
+            viewModel.refreshSavedItems()
         }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(SonnyTheme.accent.opacity(0.16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(SonnyTheme.accent.opacity(0.32), lineWidth: 1)
-                    )
-                Image(systemName: "sparkles")
-                    .font(.system(size: 19, weight: .semibold))
-                    .foregroundStyle(SonnyTheme.accent)
-            }
-            .frame(width: 38, height: 38)
+            SonnyMark()
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Sonny")
@@ -67,6 +72,14 @@ struct ContentView: View {
                     .foregroundStyle(SonnyTheme.muted)
             }
             Spacer()
+            Button {
+                viewModel.togglePermissionPanel()
+            } label: {
+                Label("Status", systemImage: "slider.horizontal.3")
+            }
+            .buttonStyle(SonnyButtonStyle(tone: .secondary))
+            .help("Show model, voice, and permission status")
+
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
@@ -123,6 +136,8 @@ struct ContentView: View {
             .buttonStyle(SonnyButtonStyle(tone: viewModel.isRecordingVoice ? .danger : .secondary))
             .help("Click to speak, or hold Control-Option-Space")
 
+            HotKeyHint(title: viewModel.voiceHotKeyReady ? "Ctrl-Opt-Space" : "Hotkey unavailable")
+
             Spacer()
 
             if viewModel.canCancel {
@@ -154,56 +169,93 @@ struct ContentView: View {
     }
 }
 
-private struct SetupStatusPanel: View {
-    @ObservedObject var viewModel: AgentViewModel
-
+private struct SonnyMark: View {
     var body: some View {
-        HStack(spacing: 8) {
-            StatusChip(
-                title: viewModel.hasAPIKey ? "Ready" : "Needs key",
-                systemImage: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash",
-                tone: viewModel.hasAPIKey ? .ready : .warning
-            )
-            StatusChip(title: viewModel.modelName, systemImage: "brain", tone: .neutral)
-            StatusChip(
-                title: viewModel.voiceHotKeyStatus,
-                systemImage: "keyboard",
-                tone: viewModel.voiceHotKeyReady ? .neutral : .warning
-            )
-            Spacer()
-            Button {
-                viewModel.togglePermissionPanel()
-            } label: {
-                Label("Readiness", systemImage: "checklist.checked")
-            }
-            .buttonStyle(SonnyButtonStyle(tone: .secondary))
-            .help("Show permission readiness")
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            SonnyTheme.accent.opacity(0.26),
+                            SonnyTheme.cyan.opacity(0.10)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(SonnyTheme.accent.opacity(0.38), lineWidth: 1)
+                )
+            Image(systemName: "wand.and.stars.inverse")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(SonnyTheme.accent)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(width: 40, height: 40)
     }
 }
 
-private struct PermissionReadinessPanel: View {
+private struct HotKeyHint: View {
+    let title: String
+
+    var body: some View {
+        Label(title, systemImage: "keyboard")
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(SonnyTheme.muted)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(SonnyTheme.surfaceRaised.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .lineLimit(1)
+    }
+}
+
+private struct SystemStatusPanel: View {
+    @ObservedObject var viewModel: AgentViewModel
+
+    var body: some View {
+        Panel(title: "System", systemImage: "slider.horizontal.3") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    StatusChip(
+                        title: viewModel.hasAPIKey ? "OpenAI ready" : "Needs key",
+                        systemImage: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash",
+                        tone: viewModel.hasAPIKey ? .ready : .warning
+                    )
+                    StatusChip(title: viewModel.modelName, systemImage: "brain", tone: .neutral)
+                    StatusChip(title: viewModel.transcriptionModelName, systemImage: "waveform", tone: .neutral)
+                    StatusChip(
+                        title: viewModel.voiceHotKeyReady ? viewModel.voiceHotKeyStatus : "Hotkey unavailable",
+                        systemImage: "keyboard",
+                        tone: viewModel.voiceHotKeyReady ? .neutral : .warning
+                    )
+                }
+
+                PermissionReadinessRows(items: viewModel.permissionItems)
+            }
+        }
+    }
+}
+
+private struct PermissionReadinessRows: View {
     let items: [PermissionReadinessItem]
 
     var body: some View {
-        Panel(title: "Readiness", systemImage: "checklist.checked") {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(items) { item in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: icon(for: item.state))
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(items) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: icon(for: item.state))
+                        .font(.caption)
+                        .foregroundStyle(color(for: item.state))
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(SonnyTheme.text)
+                        Text(item.detail)
                             .font(.caption)
-                            .foregroundStyle(color(for: item.state))
-                            .frame(width: 16)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.title)
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(SonnyTheme.text)
-                            Text(item.detail)
-                                .font(.caption)
-                                .foregroundStyle(SonnyTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                            .foregroundStyle(SonnyTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -278,6 +330,160 @@ private struct StatusChip: View {
     }
 }
 
+private struct SavedItemsPanel: View {
+    @ObservedObject var viewModel: AgentViewModel
+
+    var body: some View {
+        if !viewModel.savedRoutines.isEmpty || !viewModel.savedWorkspaces.isEmpty {
+            HStack(alignment: .top, spacing: 12) {
+                SavedColumn(
+                    title: "Routines",
+                    systemImage: "repeat",
+                    emptyLabel: "No routines",
+                    items: viewModel.savedRoutines.map { routine in
+                        SavedItem(
+                            title: routine.name,
+                            subtitle: "\(routine.steps.count) step\(routine.steps.count == 1 ? "" : "s")",
+                            details: routine.steps.prefix(4).map(routineStepLabel),
+                            actionTitle: "Run",
+                            actionIcon: "play",
+                            action: { viewModel.runRoutineWidget(routine) }
+                        )
+                    }
+                )
+
+                SavedColumn(
+                    title: "Workspaces",
+                    systemImage: "rectangle.3.group",
+                    emptyLabel: "No workspaces",
+                    items: viewModel.savedWorkspaces.map { workspace in
+                        let appCount = workspace.apps.count
+                        let urlCount = workspace.urls.count
+                        return SavedItem(
+                            title: workspace.name,
+                            subtitle: "\(appCount) app\(appCount == 1 ? "" : "s"), \(urlCount) URL\(urlCount == 1 ? "" : "s")",
+                            details: workspaceDetails(workspace),
+                            actionTitle: "Open",
+                            actionIcon: "arrow.up.right",
+                            action: { viewModel.openWorkspaceWidget(workspace) }
+                        )
+                    }
+                )
+            }
+        }
+    }
+
+    private func routineStepLabel(_ step: AgentStep) -> String {
+        switch step.operation {
+        case .openApp:
+            return "Open \(step.appName ?? "app")"
+        case .openURL:
+            return "Open \(step.targetURL ?? "URL")"
+        case .playMedia:
+            return "Open \(step.mediaTitle ?? "music")"
+        case .scanSelectLargestFiles:
+            return "Find largest files"
+        case .createZip:
+            return "Create zip"
+        case .scanDocx:
+            return "Find DOCX files"
+        case .convertDocxToPDF:
+            return "Convert DOCX to PDF"
+        case .openHackerNews:
+            return "Open Hacker News"
+        case .fetchHNHeadlines:
+            return "Fetch HN headlines"
+        case .writeMarkdown:
+            return "Write Markdown"
+        case .getFinderSelection:
+            return "Read Finder selection"
+        case .revealInFinder:
+            return "Reveal in Finder"
+        case .showPermissionReadiness:
+            return "Check status"
+        case .saveRoutine:
+            return "Save routine"
+        case .runRoutine:
+            return "Run routine"
+        case .createWorkspace:
+            return "Create workspace"
+        case .openWorkspace:
+            return "Open workspace"
+        case .clarify:
+            return "Ask clarification"
+        case .unsupported:
+            return "Unsupported step"
+        }
+    }
+
+    private func workspaceDetails(_ workspace: StoredWorkspace) -> [String] {
+        let apps = workspace.apps.isEmpty ? [] : ["Apps: \(workspace.apps.joined(separator: ", "))"]
+        let urls = workspace.urls.isEmpty ? [] : ["URLs: \(workspace.urls.joined(separator: ", "))"]
+        return apps + urls
+    }
+}
+
+private struct SavedItem: Identifiable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let details: [String]
+    let actionTitle: String
+    let actionIcon: String
+    let action: () -> Void
+}
+
+private struct SavedColumn: View {
+    let title: String
+    let systemImage: String
+    let emptyLabel: String
+    let items: [SavedItem]
+
+    var body: some View {
+        Panel(title: title, systemImage: systemImage) {
+            VStack(alignment: .leading, spacing: 8) {
+                if items.isEmpty {
+                    Text(emptyLabel)
+                        .font(.caption)
+                        .foregroundStyle(SonnyTheme.muted)
+                } else {
+                    ForEach(items.prefix(3)) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(SonnyTheme.text)
+                                        .lineLimit(1)
+                                    Text(item.subtitle)
+                                        .font(.caption2)
+                                        .foregroundStyle(SonnyTheme.muted)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Button(action: item.action) {
+                                    Label(item.actionTitle, systemImage: item.actionIcon)
+                                }
+                                .buttonStyle(SonnyMiniButtonStyle())
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(item.details, id: \.self) { detail in
+                                    Label(detail, systemImage: "smallcircle.filled.circle")
+                                        .font(.caption2)
+                                        .foregroundStyle(SonnyTheme.muted)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct RunDetailsView: View {
     @ObservedObject var viewModel: AgentViewModel
     @ObservedObject var logStore: AgentLogStore
@@ -294,7 +500,11 @@ private struct RunDetailsView: View {
                         PreviewPanel(previews: viewModel.previews)
                     }
 
-                    LogPanel(logStore: logStore)
+                    if logStore.events.isEmpty && viewModel.plan == nil && viewModel.previews.isEmpty && viewModel.finalSummary.isEmpty {
+                        StartupPanel()
+                    } else {
+                        LogPanel(logStore: logStore)
+                    }
 
                     if !viewModel.finalSummary.isEmpty {
                         SummaryPanel(
@@ -437,23 +647,17 @@ private struct LogPanel: View {
 
     var body: some View {
         Panel(title: "Log", systemImage: "waveform.path.ecg") {
-            if logStore.events.isEmpty {
-                Text("Idle")
-                    .font(.caption)
-                    .foregroundStyle(SonnyTheme.muted)
-            } else {
-                VStack(alignment: .leading, spacing: 7) {
-                    ForEach(logStore.events) { event in
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(event.phase.rawValue)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(phaseColor(event.phase))
-                                .frame(width: 74, alignment: .leading)
-                            Text(event.message)
-                                .font(.caption)
-                                .foregroundStyle(SonnyTheme.text.opacity(0.88))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(logStore.events) { event in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(event.phase.rawValue)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(phaseColor(event.phase))
+                            .frame(width: 74, alignment: .leading)
+                        Text(event.message)
+                            .font(.caption)
+                            .foregroundStyle(SonnyTheme.text.opacity(0.88))
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -476,6 +680,56 @@ private struct LogPanel: View {
             return SonnyTheme.accent
         case .summarize:
             return SonnyTheme.muted
+        }
+    }
+}
+
+private struct StartupPanel: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal")
+                    .foregroundStyle(SonnyTheme.accent)
+                Text("Ready when you are")
+                    .font(.headline)
+                    .foregroundStyle(SonnyTheme.text)
+            }
+
+            StartupCapabilities()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel(cornerRadius: 8)
+    }
+}
+
+private struct StartupCapabilities: View {
+    private let items = [
+        ("Finder context", "Use selected Finder folders safely."),
+        ("Chain actions", "Zip, save, reveal, and open in one request."),
+        ("Routines", "Teach repeatable local workflows."),
+        ("Workspaces", "Launch saved app and URL sets."),
+        ("Voice", "Hold the hotkey, speak, release.")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(items, id: \.0) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(SonnyTheme.accent)
+                        .frame(width: 16)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(item.0)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(SonnyTheme.text.opacity(0.92))
+                        Text(item.1)
+                            .font(.caption2)
+                            .foregroundStyle(SonnyTheme.muted)
+                    }
+                }
+            }
         }
     }
 }
@@ -655,29 +909,42 @@ private struct Panel<Content: View>: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(SonnyTheme.surface)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(SonnyTheme.border, lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .glassPanel(cornerRadius: 8)
     }
 }
 
 private enum SonnyTheme {
-    static let background = Color(red: 0.055, green: 0.054, blue: 0.060)
-    static let surface = Color(red: 0.092, green: 0.089, blue: 0.100)
-    static let surfaceRaised = Color(red: 0.125, green: 0.119, blue: 0.132)
-    static let input = Color(red: 0.118, green: 0.112, blue: 0.132)
-    static let border = Color(red: 0.235, green: 0.225, blue: 0.250)
-    static let text = Color(red: 0.920, green: 0.900, blue: 0.860)
-    static let muted = Color(red: 0.610, green: 0.595, blue: 0.555)
-    static let accent = Color(red: 0.685, green: 0.875, blue: 0.610)
+    static let glassShade = Color(red: 0.028, green: 0.032, blue: 0.030).opacity(0.58)
+    static let panelTint = Color(red: 0.045, green: 0.047, blue: 0.050).opacity(0.66)
+    static let surfaceRaised = Color(red: 0.128, green: 0.126, blue: 0.134).opacity(0.78)
+    static let input = Color(red: 0.070, green: 0.073, blue: 0.076).opacity(0.72)
+    static let border = Color(red: 0.245, green: 0.248, blue: 0.244).opacity(0.64)
+    static let text = Color(red: 0.925, green: 0.908, blue: 0.872)
+    static let muted = Color(red: 0.626, green: 0.612, blue: 0.574)
+    static let accent = Color(red: 0.690, green: 0.880, blue: 0.615)
     static let warning = Color(red: 0.930, green: 0.655, blue: 0.350)
     static let danger = Color(red: 0.940, green: 0.390, blue: 0.405)
-    static let info = Color(red: 0.420, green: 0.690, blue: 0.960)
-    static let cyan = Color(red: 0.375, green: 0.780, blue: 0.780)
-    static let lilac = Color(red: 0.690, green: 0.570, blue: 0.950)
+    static let info = Color(red: 0.470, green: 0.690, blue: 0.920)
+    static let cyan = Color(red: 0.390, green: 0.760, blue: 0.730)
+    static let lilac = Color(red: 0.700, green: 0.600, blue: 0.900)
+}
+
+private extension View {
+    func glassPanel(cornerRadius: CGFloat) -> some View {
+        background(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(.thinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(SonnyTheme.panelTint)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .stroke(SonnyTheme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
 }
 
 private struct SonnyButtonStyle: ButtonStyle {
@@ -745,5 +1012,21 @@ private struct SonnyIconButtonStyle: ButtonStyle {
             .frame(width: 30, height: 30)
             .background(configuration.isPressed ? SonnyTheme.surfaceRaised : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct SonnyMiniButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(SonnyTheme.text)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(SonnyTheme.surfaceRaised.opacity(configuration.isPressed ? 0.55 : 0.86))
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(SonnyTheme.border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 7))
     }
 }

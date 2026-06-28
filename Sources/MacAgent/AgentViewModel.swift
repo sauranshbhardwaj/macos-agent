@@ -23,6 +23,8 @@ final class AgentViewModel: ObservableObject {
     @Published var voiceHotKeyReady: Bool = true
     @Published var showPermissionPanel: Bool = false
     @Published var permissionItems: [PermissionReadinessItem] = []
+    @Published var savedRoutines: [StoredRoutine] = []
+    @Published var savedWorkspaces: [StoredWorkspace] = []
 
     let logStore = AgentLogStore()
 
@@ -31,6 +33,8 @@ final class AgentViewModel: ObservableObject {
     private var currentTask: Task<Void, Never>?
     private let audioRecorder = AudioCommandRecorder()
     private let permissionReadinessService = PermissionReadinessService()
+    private let routineStore = RoutineStore()
+    private let workspaceStore = WorkspaceStore()
     private var clarificationAutoExecute = false
     private var isPushToTalkHotKeyDown = false
 
@@ -152,6 +156,7 @@ final class AgentViewModel: ObservableObject {
                 )
                 finalSummary = result.summary
                 suggestions = result.suggestions
+                refreshSavedItems()
             }
         } catch is CancellationError {
             markAllSteps(.canceled)
@@ -247,6 +252,25 @@ final class AgentViewModel: ObservableObject {
         showPermissionPanel.toggle()
     }
 
+    func refreshSavedItems() {
+        savedRoutines = ((try? routineStore.loadAll().values.map { $0 }) ?? [])
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        savedWorkspaces = ((try? workspaceStore.loadAll().values.map { $0 }) ?? [])
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func runRoutineWidget(_ routine: StoredRoutine) {
+        command = "Run my \(routine.name) routine."
+        dryRun = false
+        start(autoExecute: true)
+    }
+
+    func openWorkspaceWidget(_ workspace: StoredWorkspace) {
+        command = "Open my \(workspace.name) workspace."
+        dryRun = false
+        start(autoExecute: true)
+    }
+
     func runSuggestion(_ suggestion: RunSuggestion) {
         let url = URL(fileURLWithPath: suggestion.value)
         switch suggestion.kind {
@@ -285,6 +309,7 @@ final class AgentViewModel: ObservableObject {
         isPushToTalkHotKeyDown = false
         showPermissionPanel = false
         refreshPermissions()
+        refreshSavedItems()
         preparedRun = nil
         runner = nil
         logStore.reset()

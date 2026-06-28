@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Sonny")
+        item.button?.image = NSImage(systemSymbolName: "wand.and.stars.inverse", accessibilityDescription: "Sonny")
         item.button?.imagePosition = .imageLeading
         item.button?.title = " Sonny"
         item.button?.action = #selector(togglePopover(_:))
@@ -19,7 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 600, height: 740)
-        popover.contentViewController = NSHostingController(rootView: ContentView(viewModel: viewModel))
+        let hostingController = NSHostingController(rootView: ContentView(viewModel: viewModel))
+        hostingController.view.wantsLayer = true
+        hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
+        popover.contentViewController = hostingController
 
         do {
             pushToTalkHotKey = try PushToTalkHotKey(
@@ -58,5 +61,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        if let window = popover.contentViewController?.view.window {
+            window.isOpaque = false
+            window.backgroundColor = .clear
+        }
     }
 }
