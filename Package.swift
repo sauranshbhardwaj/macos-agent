@@ -19,7 +19,10 @@ let package = Package(
         .executableTarget(
             name: "MacAgent",
             dependencies: ["MacAgentCore"],
-            path: "Sources/MacAgent"
+            path: "Sources/MacAgent",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .testTarget(
             name: "MacAgentCoreTests",

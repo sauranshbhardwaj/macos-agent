@@ -12,19 +12,16 @@ struct ContentView: View {
             SonnyTheme.glassShade
             LinearGradient(
                 colors: [
-                    SonnyTheme.accent.opacity(0.08),
+                    SonnyTheme.accent.opacity(0.10),
                     Color.clear,
-                    SonnyTheme.cyan.opacity(0.05)
+                    SonnyTheme.cream.opacity(0.04)
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
                 header
-                if viewModel.showPermissionPanel {
-                    SystemStatusPanel(viewModel: viewModel)
-                }
                 commandInput
                 controls
                 SavedItemsPanel(viewModel: viewModel)
@@ -48,10 +45,21 @@ struct ContentView: View {
                 RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
             }
             .padding(20)
+
+            if viewModel.showPermissionPanel {
+                SystemStatusPanel(viewModel: viewModel)
+                    .frame(width: 384)
+                    .padding(.top, 84)
+                    .padding(.trailing, 20)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .transition(.opacity)
+                    .zIndex(5)
+            }
         }
         .frame(width: 600, height: 740)
         .background(.clear)
         .foregroundStyle(SonnyTheme.text)
+        .tint(SonnyTheme.accent)
         .onAppear {
             commandFocused = true
             viewModel.refreshPermissions()
@@ -63,12 +71,13 @@ struct ContentView: View {
         HStack(spacing: 12) {
             SonnyMark()
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text("Sonny")
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .font(SonnyType.brand)
                     .foregroundStyle(SonnyTheme.text)
+                    .lineLimit(1)
                 Text("Ask. Check. Done.")
-                    .font(.caption.weight(.medium))
+                    .font(SonnyType.tagline)
                     .foregroundStyle(SonnyTheme.muted)
             }
             Spacer()
@@ -93,11 +102,11 @@ struct ContentView: View {
     private var commandInput: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Ask Sonny")
-                .font(.caption.weight(.semibold))
+                .font(SonnyType.eyebrow)
                 .foregroundStyle(SonnyTheme.muted)
             TextField("Open Safari, zip files, convert docs...", text: $viewModel.command)
                 .textFieldStyle(.plain)
-                .font(.system(size: 15, weight: .medium))
+                .font(SonnyType.command)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 11)
                 .background(SonnyTheme.input)
@@ -115,30 +124,32 @@ struct ContentView: View {
 
             if !viewModel.voiceTranscript.isEmpty {
                 Label("Voice command received", systemImage: "waveform")
-                    .font(.caption)
+                    .font(SonnyType.caption)
                     .foregroundStyle(SonnyTheme.muted)
             }
         }
     }
 
     private var controls: some View {
-        HStack(spacing: 10) {
-            Toggle("Dry run", isOn: $viewModel.dryRun)
-                .toggleStyle(.switch)
-                .disabled(viewModel.isRunning)
+        HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                DryRunToggle(isOn: $viewModel.dryRun)
+                    .disabled(viewModel.isRunning)
 
-            Button {
-                viewModel.toggleVoiceRecording()
-            } label: {
-                Label(viewModel.voiceButtonTitle, systemImage: viewModel.voiceButtonIcon)
+                Button {
+                    viewModel.toggleVoiceRecording()
+                } label: {
+                    Label(viewModel.voiceButtonTitle, systemImage: viewModel.voiceButtonIcon)
+                }
+                .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
+                .buttonStyle(SonnyButtonStyle(tone: viewModel.isRecordingVoice ? .danger : .secondary, width: 86))
+                .help("Click to speak, or hold Control-Option-Space")
+
+                HotKeyHint(title: viewModel.voiceHotKeyReady ? "Ctrl-Opt-Space" : "Unavailable")
             }
-            .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
-            .buttonStyle(SonnyButtonStyle(tone: viewModel.isRecordingVoice ? .danger : .secondary))
-            .help("Click to speak, or hold Control-Option-Space")
+            .frame(width: 320, alignment: .leading)
 
-            HotKeyHint(title: viewModel.voiceHotKeyReady ? "Ctrl-Opt-Space" : "Hotkey unavailable")
-
-            Spacer()
+            Spacer(minLength: 12)
 
             if viewModel.canCancel {
                 Button {
@@ -146,16 +157,16 @@ struct ContentView: View {
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
-                .buttonStyle(SonnyButtonStyle(tone: .secondary))
+                .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 86))
+            } else {
+                Button {
+                    viewModel.reset()
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+                .disabled(viewModel.isRunning)
+                .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 80))
             }
-
-            Button {
-                viewModel.reset()
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-            }
-            .disabled(viewModel.isRunning)
-            .buttonStyle(SonnyButtonStyle(tone: .secondary))
 
             Button {
                 viewModel.start()
@@ -164,8 +175,9 @@ struct ContentView: View {
             }
             .keyboardShortcut(.return, modifiers: [])
             .disabled(!viewModel.canSubmit)
-            .buttonStyle(SonnyButtonStyle(tone: .primary))
+            .buttonStyle(SonnyButtonStyle(tone: .primary, width: 92))
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -176,8 +188,8 @@ private struct SonnyMark: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            SonnyTheme.accent.opacity(0.26),
-                            SonnyTheme.cyan.opacity(0.10)
+                            SonnyTheme.cream.opacity(0.10),
+                            SonnyTheme.accent.opacity(0.18)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -188,10 +200,10 @@ private struct SonnyMark: View {
                         .stroke(SonnyTheme.accent.opacity(0.38), lineWidth: 1)
                 )
             Image(systemName: "wand.and.stars.inverse")
-                .font(.system(size: 18, weight: .semibold))
+                .font(SonnyType.icon(17))
                 .foregroundStyle(SonnyTheme.accent)
         }
-        .frame(width: 40, height: 40)
+        .frame(width: 42, height: 42)
     }
 }
 
@@ -200,13 +212,32 @@ private struct HotKeyHint: View {
 
     var body: some View {
         Label(title, systemImage: "keyboard")
-            .font(.caption2.weight(.medium))
+            .font(SonnyType.micro)
             .foregroundStyle(SonnyTheme.muted)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .lineLimit(1)
+            .minimumScaleFactor(0.84)
+            .frame(width: 112, height: 34)
             .background(SonnyTheme.surfaceRaised.opacity(0.72))
             .clipShape(RoundedRectangle(cornerRadius: 7))
-            .lineLimit(1)
+    }
+}
+
+private struct DryRunToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("Dry run")
+                .font(SonnyType.caption)
+                .foregroundStyle(SonnyTheme.text)
+                .lineLimit(1)
+                .frame(width: 44, alignment: .leading)
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .frame(width: 54)
+        }
+        .frame(width: 106, height: 34, alignment: .leading)
     }
 }
 
@@ -214,9 +245,16 @@ private struct SystemStatusPanel: View {
     @ObservedObject var viewModel: AgentViewModel
 
     var body: some View {
-        Panel(title: "System", systemImage: "slider.horizontal.3") {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
+        Panel(title: "Status", systemImage: "slider.horizontal.3") {
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 8),
+                        GridItem(.flexible(), spacing: 8)
+                    ],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
                     StatusChip(
                         title: viewModel.hasAPIKey ? "OpenAI ready" : "Needs key",
                         systemImage: viewModel.hasAPIKey ? "checkmark.seal" : "key.slash",
@@ -231,7 +269,15 @@ private struct SystemStatusPanel: View {
                     )
                 }
 
-                PermissionReadinessRows(items: viewModel.permissionItems)
+                Rectangle()
+                    .fill(SonnyTheme.border)
+                    .frame(height: 1)
+
+                ScrollView {
+                    PermissionReadinessRows(items: viewModel.permissionItems)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 248)
             }
         }
     }
@@ -245,16 +291,18 @@ private struct PermissionReadinessRows: View {
             ForEach(items) { item in
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: icon(for: item.state))
-                        .font(.caption)
+                        .font(SonnyType.caption)
                         .foregroundStyle(color(for: item.state))
                         .frame(width: 16)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.title)
-                            .font(.caption.weight(.semibold))
+                            .font(SonnyType.caption)
                             .foregroundStyle(SonnyTheme.text)
+                            .lineLimit(1)
                         Text(item.detail)
-                            .font(.caption)
+                            .font(SonnyType.micro)
                             .foregroundStyle(SonnyTheme.muted)
+                            .lineSpacing(1)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -298,13 +346,14 @@ private struct StatusChip: View {
 
     var body: some View {
         Label(title, systemImage: systemImage)
-            .font(.caption.weight(.medium))
+            .font(SonnyType.caption)
             .foregroundStyle(foreground)
+            .lineLimit(1)
+            .minimumScaleFactor(0.82)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
             .padding(.horizontal, 9)
-            .padding(.vertical, 6)
             .background(background)
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .lineLimit(1)
     }
 
     private var foreground: Color {
@@ -441,22 +490,22 @@ private struct SavedColumn: View {
 
     var body: some View {
         Panel(title: title, systemImage: systemImage) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 if items.isEmpty {
                     Text(emptyLabel)
-                        .font(.caption)
+                        .font(SonnyType.caption)
                         .foregroundStyle(SonnyTheme.muted)
                 } else {
                     ForEach(items.prefix(3)) { item in
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 9) {
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                VStack(alignment: .leading, spacing: 2) {
+                                VStack(alignment: .leading, spacing: 3) {
                                     Text(item.title)
-                                        .font(.caption.weight(.semibold))
+                                        .font(SonnyType.itemTitle)
                                         .foregroundStyle(SonnyTheme.text)
                                         .lineLimit(1)
                                     Text(item.subtitle)
-                                        .font(.caption2)
+                                        .font(SonnyType.micro)
                                         .foregroundStyle(SonnyTheme.muted)
                                         .lineLimit(1)
                                 }
@@ -469,14 +518,19 @@ private struct SavedColumn: View {
 
                             VStack(alignment: .leading, spacing: 4) {
                                 ForEach(item.details, id: \.self) { detail in
-                                    Label(detail, systemImage: "smallcircle.filled.circle")
-                                        .font(.caption2)
-                                        .foregroundStyle(SonnyTheme.muted)
-                                        .lineLimit(1)
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .stroke(SonnyTheme.accent.opacity(0.58), lineWidth: 1)
+                                            .frame(width: 6, height: 6)
+                                        Text(detail)
+                                            .font(SonnyType.micro)
+                                            .foregroundStyle(SonnyTheme.muted)
+                                            .lineLimit(1)
+                                    }
                                 }
                             }
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 1)
                     }
                 }
             }
@@ -547,19 +601,21 @@ private struct PlanPanel: View {
         Panel(title: "Plan", systemImage: "list.bullet.rectangle") {
             VStack(alignment: .leading, spacing: 8) {
                 Text(plan.summary)
-                    .font(.callout.weight(.medium))
+                    .font(SonnyType.bodyEmphasis)
                     .foregroundStyle(SonnyTheme.text)
+                    .lineSpacing(2)
 
                 ForEach(plan.steps) { step in
                     HStack(alignment: .top, spacing: 8) {
                         StepStatusIcon(status: stepStatuses[step.id] ?? .pending)
                         Text(step.operation.rawValue)
-                            .font(.caption.monospaced())
+                            .font(SonnyType.code)
                             .foregroundStyle(SonnyTheme.muted)
                             .frame(width: 140, alignment: .leading)
                         Text(step.description)
-                            .font(.caption)
+                            .font(SonnyType.caption)
                             .foregroundStyle(SonnyTheme.text.opacity(0.9))
+                            .lineSpacing(1)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -573,7 +629,7 @@ private struct StepStatusIcon: View {
 
     var body: some View {
         Image(systemName: icon)
-            .font(.caption)
+            .font(SonnyType.caption)
             .foregroundStyle(color)
             .frame(width: 16)
             .help(status.rawValue)
@@ -619,20 +675,23 @@ private struct PreviewPanel: View {
                 ForEach(previews) { preview in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(preview.title)
-                            .font(.callout.weight(.semibold))
+                            .font(SonnyType.bodyEmphasis)
                             .foregroundStyle(SonnyTheme.text)
+                            .lineSpacing(2)
 
                         ForEach(preview.details, id: \.self) { detail in
                             Text(detail)
-                                .font(.caption)
+                                .font(SonnyType.caption)
                                 .foregroundStyle(SonnyTheme.muted)
+                                .lineSpacing(1)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
                         ForEach(preview.sideEffects, id: \.self) { sideEffect in
                             Label(sideEffect, systemImage: "exclamationmark.triangle")
-                                .font(.caption)
+                                .font(SonnyType.caption)
                                 .foregroundStyle(SonnyTheme.warning)
+                                .lineSpacing(1)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -651,12 +710,13 @@ private struct LogPanel: View {
                 ForEach(logStore.events) { event in
                     HStack(alignment: .top, spacing: 8) {
                         Text(event.phase.rawValue)
-                            .font(.caption.monospaced())
+                            .font(SonnyType.code)
                             .foregroundStyle(phaseColor(event.phase))
                             .frame(width: 74, alignment: .leading)
                         Text(event.message)
-                            .font(.caption)
+                            .font(SonnyType.caption)
                             .foregroundStyle(SonnyTheme.text.opacity(0.88))
+                            .lineSpacing(1)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -667,15 +727,15 @@ private struct LogPanel: View {
     private func phaseColor(_ phase: AgentPhase) -> Color {
         switch phase {
         case .plan:
-            return SonnyTheme.info
+            return SonnyTheme.cream.opacity(0.72)
         case .validate:
-            return SonnyTheme.lilac
+            return SonnyTheme.accent
         case .preview:
-            return SonnyTheme.cyan
+            return SonnyTheme.accent
         case .confirm:
             return SonnyTheme.warning
         case .act:
-            return SonnyTheme.lilac
+            return SonnyTheme.cream.opacity(0.86)
         case .observe:
             return SonnyTheme.accent
         case .summarize:
@@ -686,18 +746,19 @@ private struct LogPanel: View {
 
 private struct StartupPanel: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.seal")
+                    .font(SonnyType.panelIcon)
                     .foregroundStyle(SonnyTheme.accent)
                 Text("Ready when you are")
-                    .font(.headline)
+                    .font(SonnyType.hero)
                     .foregroundStyle(SonnyTheme.text)
             }
 
             StartupCapabilities()
         }
-        .padding(12)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassPanel(cornerRadius: 8)
     }
@@ -713,20 +774,26 @@ private struct StartupCapabilities: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        LazyVGrid(columns: [
+            GridItem(.flexible(), spacing: 14),
+            GridItem(.flexible(), spacing: 14)
+        ], alignment: .leading, spacing: 12) {
             ForEach(items, id: \.0) { item in
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .top, spacing: 9) {
                     Image(systemName: "checkmark.circle")
-                        .font(.caption)
+                        .font(SonnyType.micro)
                         .foregroundStyle(SonnyTheme.accent)
-                        .frame(width: 16)
-                    VStack(alignment: .leading, spacing: 1) {
+                        .frame(width: 14)
+                        .padding(.top, 2)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(item.0)
-                            .font(.caption.weight(.medium))
+                            .font(SonnyType.itemTitle)
                             .foregroundStyle(SonnyTheme.text.opacity(0.92))
                         Text(item.1)
-                            .font(.caption2)
+                            .font(SonnyType.micro)
                             .foregroundStyle(SonnyTheme.muted)
+                            .lineSpacing(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -742,7 +809,7 @@ private struct BusyPanel: View {
             ProgressView()
                 .controlSize(.small)
             Text(latestMessage)
-                .font(.caption.weight(.medium))
+                .font(SonnyType.caption)
                 .foregroundStyle(SonnyTheme.text)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -774,7 +841,7 @@ private struct VoiceStatusPanel: View {
                     .foregroundStyle(SonnyTheme.danger)
             }
             Text(message)
-                .font(.caption.weight(.medium))
+                .font(SonnyType.caption)
                 .foregroundStyle(SonnyTheme.text)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -806,8 +873,9 @@ private struct SummaryPanel: View {
         Panel(title: "Summary", systemImage: "doc.text") {
             VStack(alignment: .leading, spacing: 10) {
                 Text(summary)
-                    .font(.callout)
+                    .font(SonnyType.body)
                     .foregroundStyle(SonnyTheme.text)
+                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     Button(action: copy) {
@@ -846,12 +914,14 @@ private struct ClarificationPanel: View {
         Panel(title: "Clarify", systemImage: "questionmark.bubble") {
             VStack(alignment: .leading, spacing: 8) {
                 Text(question)
-                    .font(.callout.weight(.medium))
+                    .font(SonnyType.bodyEmphasis)
                     .foregroundStyle(SonnyTheme.text)
+                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
                     TextField("Answer", text: $viewModel.clarificationAnswer)
                         .textFieldStyle(.plain)
+                        .font(SonnyType.body)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
                         .background(SonnyTheme.input)
@@ -884,8 +954,9 @@ private struct ErrorBanner: View {
             Image(systemName: "xmark.octagon.fill")
                 .foregroundStyle(SonnyTheme.danger)
             Text(message)
-                .font(.caption)
+                .font(SonnyType.caption)
                 .foregroundStyle(SonnyTheme.text)
+                .lineSpacing(1)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
@@ -901,32 +972,72 @@ private struct Panel<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .foregroundStyle(SonnyTheme.text)
+        VStack(alignment: .leading, spacing: 12) {
+            PanelHeader(title: title, systemImage: systemImage)
             content
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassPanel(cornerRadius: 8)
     }
 }
 
+private struct PanelHeader: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 9) {
+            Image(systemName: systemImage)
+                .font(SonnyType.panelIcon)
+                .foregroundStyle(SonnyTheme.accent)
+                .frame(width: 18, alignment: .center)
+            Text(title)
+                .font(SonnyType.panelTitle)
+                .foregroundStyle(SonnyTheme.text)
+                .lineLimit(1)
+        }
+    }
+}
+
+private enum SonnyType {
+    static let brand = Font.custom("InstrumentSerif-Regular", size: 42)
+    static let hero = Font.custom("InstrumentSerif-Regular", size: 28)
+    static let panelTitle = Font.custom("InstrumentSerif-Regular", size: 23)
+    static let tagline = Font.custom("GolosText-Regular", size: 12)
+    static let eyebrow = Font.custom("GolosText-Regular", size: 11)
+    static let command = Font.custom("GolosText-Regular", size: 15)
+    static let body = Font.custom("GolosText-Regular", size: 13)
+    static let bodyEmphasis = Font.custom("GolosText-Regular", size: 13)
+    static let itemTitle = Font.custom("GolosText-Regular", size: 12)
+    static let caption = Font.custom("GolosText-Regular", size: 12)
+    static let micro = Font.custom("GolosText-Regular", size: 11)
+    static let code = Font.custom("GolosText-Regular", size: 11)
+    static let panelIcon = Font.system(size: 14)
+
+    static func icon(_ size: CGFloat) -> Font {
+        .system(size: size)
+    }
+}
+
 private enum SonnyTheme {
-    static let glassShade = Color(red: 0.028, green: 0.032, blue: 0.030).opacity(0.58)
-    static let panelTint = Color(red: 0.045, green: 0.047, blue: 0.050).opacity(0.66)
-    static let surfaceRaised = Color(red: 0.128, green: 0.126, blue: 0.134).opacity(0.78)
-    static let input = Color(red: 0.070, green: 0.073, blue: 0.076).opacity(0.72)
-    static let border = Color(red: 0.245, green: 0.248, blue: 0.244).opacity(0.64)
-    static let text = Color(red: 0.925, green: 0.908, blue: 0.872)
-    static let muted = Color(red: 0.626, green: 0.612, blue: 0.574)
-    static let accent = Color(red: 0.690, green: 0.880, blue: 0.615)
-    static let warning = Color(red: 0.930, green: 0.655, blue: 0.350)
-    static let danger = Color(red: 0.940, green: 0.390, blue: 0.405)
-    static let info = Color(red: 0.470, green: 0.690, blue: 0.920)
-    static let cyan = Color(red: 0.390, green: 0.760, blue: 0.730)
-    static let lilac = Color(red: 0.700, green: 0.600, blue: 0.900)
+    static let ink = Color(red: 0.118, green: 0.110, blue: 0.110)
+    static let cream = Color(red: 1.000, green: 0.996, blue: 0.988)
+    static let paper = Color(red: 0.922, green: 0.914, blue: 0.886)
+    static let bronze = Color(red: 0.663, green: 0.561, blue: 0.439)
+    static let stone = Color(red: 0.639, green: 0.627, blue: 0.604)
+
+    static let glassShade = ink.opacity(0.68)
+    static let panelTint = ink.opacity(0.58)
+    static let surfaceRaised = Color(red: 0.224, green: 0.216, blue: 0.216).opacity(0.74)
+    static let input = Color(red: 0.150, green: 0.140, blue: 0.134).opacity(0.76)
+    static let border = cream.opacity(0.13)
+    static let text = cream
+    static let muted = stone
+    static let accent = bronze
+    static let warning = Color(red: 0.988, green: 0.706, blue: 0.000)
+    static let danger = Color(red: 0.973, green: 0.169, blue: 0.376)
+    static let info = paper
 }
 
 private extension View {
@@ -949,6 +1060,7 @@ private extension View {
 
 private struct SonnyButtonStyle: ButtonStyle {
     let tone: Tone
+    var width: CGFloat? = nil
 
     enum Tone {
         case primary
@@ -956,24 +1068,47 @@ private struct SonnyButtonStyle: ButtonStyle {
         case danger
     }
 
+    init(tone: Tone, width: CGFloat? = nil) {
+        self.tone = tone
+        self.width = width
+    }
+
     func makeBody(configuration: Configuration) -> some View {
+        if let width {
+            label(configuration)
+                .frame(width: width, height: 34)
+                .background(background.opacity(configuration.isPressed ? 0.72 : 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            label(configuration)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(background.opacity(configuration.isPressed ? 0.72 : 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func label(_ configuration: Configuration) -> some View {
         configuration.label
-            .font(.caption.weight(.semibold))
+            .font(SonnyType.caption)
             .foregroundStyle(foreground)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(background.opacity(configuration.isPressed ? 0.72 : 1))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(border, lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .lineLimit(1)
+            .minimumScaleFactor(0.86)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var foreground: Color {
         switch tone {
         case .primary:
-            return Color(red: 0.050, green: 0.055, blue: 0.048)
+            return SonnyTheme.ink
         case .secondary:
             return SonnyTheme.text
         case .danger:
@@ -1007,7 +1142,7 @@ private struct SonnyButtonStyle: ButtonStyle {
 private struct SonnyIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 14, weight: .semibold))
+            .font(SonnyType.icon(14))
             .foregroundStyle(SonnyTheme.muted)
             .frame(width: 30, height: 30)
             .background(configuration.isPressed ? SonnyTheme.surfaceRaised : Color.clear)
@@ -1018,7 +1153,7 @@ private struct SonnyIconButtonStyle: ButtonStyle {
 private struct SonnyMiniButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.caption2.weight(.semibold))
+            .font(SonnyType.micro)
             .foregroundStyle(SonnyTheme.text)
             .padding(.horizontal, 8)
             .padding(.vertical, 5)

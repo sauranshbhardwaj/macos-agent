@@ -1,4 +1,5 @@
 import AppKit
+import CoreText
 import SwiftUI
 
 @MainActor
@@ -9,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pushToTalkHotKey: PushToTalkHotKey?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        registerBundledFonts()
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "wand.and.stars.inverse", accessibilityDescription: "Sonny")
         item.button?.imagePosition = .imageLeading
@@ -40,6 +43,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         print("Sonny is running. Click the Sonny item in the macOS menu bar to open it.")
+    }
+
+    private func registerBundledFonts() {
+        for fontName in ["InstrumentSerif-Regular", "GolosText-Regular"] {
+            guard let url = Bundle.module.url(forResource: fontName, withExtension: "ttf")
+                ?? Bundle.module.url(forResource: fontName, withExtension: "ttf", subdirectory: "Fonts")
+            else {
+                print("Sonny could not find bundled font: \(fontName)")
+                continue
+            }
+
+            var error: Unmanaged<CFError>?
+            guard !CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error),
+                  let registrationError = error?.takeRetainedValue()
+            else {
+                continue
+            }
+
+            print("Sonny could not register font \(fontName): \(registrationError.localizedDescription)")
+        }
     }
 
     @objc private func togglePopover(_ sender: AnyObject?) {

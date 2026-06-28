@@ -38,6 +38,7 @@ env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift run --disable
 ```
 
 The visible product name is Sonny. The SwiftPM executable is still `MacAgent`.
+Sonny bundles Instrument Serif Regular and Golos Text Regular for its UI, with a warm Sonatic-inspired ink, cream, stone, and bronze palette.
 
 ## Permissions
 
