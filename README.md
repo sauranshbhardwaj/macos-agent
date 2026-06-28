@@ -2,7 +2,13 @@
 
 Sonny is a macOS menu-bar agent prototype that turns typed or spoken natural-language requests into validated local actions. It plans with OpenAI, previews side effects, executes only registered local tools, and streams logs plus a final summary.
 
-https://github.com/user-attachments/assets/16a27d55-868f-48a6-9583-6a4d5231a1f5
+## Cool Prototype Demo
+
+https://drive.google.com/file/d/1_tAHM9kTIWMuatAsIjqXQUAeqKZqXCNv/view?usp=sharing
+
+## Uncool Prototype Demo
+
+https://drive.google.com/file/d/12lJnnqiBrbGnua2pGyE2GsYaVBcil0qe/view?usp=sharing
 
 ## What Sonny Can Do
 
