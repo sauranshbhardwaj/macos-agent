@@ -1,9 +1,9 @@
 # Sonny Major Release Engineering Blueprint
 
-Version: 1.0  
+Version: 1.1  
 Status: Planning source of truth for Sonny v1 major release  
 Audience: Engineering, product, security, and future implementation chats  
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 
 ## 1. Executive Summary
 
@@ -15,6 +15,8 @@ The first major release should target Mac power users with two core promises:
 
 - Sonny is agentic: it can reason, use tools, inspect the screen, control approved apps in Power Mode, chain tasks, and improve routines.
 - Sonny is trustworthy: it captures only when invoked, protects data locally before upload, shows what is sent to AI, requires risk-based approvals, and keeps an auditable action trail.
+
+Before the major-release roadmap begins, the existing prototype should go through a small but important pre-major-release implementation pass. That pass should make the current hard-edged demos more general: Hacker News becomes general web-to-Markdown research, media result opening becomes real playback where provider APIs allow it, app opening becomes a more general app/action adapter foundation, and the menu-bar popover gains a companion full Mac app for account, settings, privacy, stats, routines, workspaces, and Power Mode controls.
 
 ## 2. Product Thesis
 
@@ -28,6 +30,11 @@ Sonny should combine four surfaces:
 - Context engine: screen capture, OCR, active app/window metadata, Finder selection, browser/page context, files, documents, and user memory.
 - Agent runtime: intent extraction, planning, tool selection, risk assessment, action execution, observation, retry, and final summary.
 - Native actuator: local Swift macOS app with Screen Recording, Accessibility, Automation, Files/Folders, Microphone, browser/app opening, and deterministic executors.
+
+Sonny should also have two native product surfaces:
+
+- Agent cockpit: the menu-bar popover for fast commands, voice, current task state, quick approvals, Power Mode pause/stop, recent outputs, routine launch, and workspace launch.
+- Sonny Command Center: the normal Mac app for account, subscription, settings, privacy controls, Data Sent To AI history, routines/workspaces editing, usage and impact stats, Power Mode app approvals, permissions, and enterprise/admin controls later.
 
 ### 2.2 What Sonny Is Not
 
@@ -241,6 +248,232 @@ The existing prototype already proves the product direction:
 
 This baseline should be treated as a prototype, not as the public-release architecture. Future implementation must preserve what works while replacing prototype assumptions with production systems: hosted auth, agent traces, capability registry, richer permission model, screen context, Power Mode, backend, subscriptions, and enterprise foundations.
 
+Prototype limitations to resolve before the major release:
+
+- Hacker News is a special-case web workflow; it should become a general web/source-to-Markdown capability.
+- Music only opens provider results; it should attempt real playback through first-party provider APIs where available.
+- App opening is useful but shallow; it should become the foundation for app adapters and app-scoped actions.
+- The menu-bar popover is a strong cockpit, but account, settings, history, stats, privacy, and Power Mode controls need a full Mac app surface.
+- Existing local tools are still too prototype-shaped; they need more generic schemas, reusable adapters, and capability-style naming before the hosted runtime work starts.
+
+## 4A. Pre-Major-Release Implementation Pass
+
+This pass should happen before the full v1 major-release roadmap. It is intentionally smaller than the major release, but it is strategically important because it turns the existing prototype from a set of impressive demos into a broader local agent foundation.
+
+Goals:
+
+- Preserve every existing working feature.
+- Generalize narrow prototype workflows into reusable capabilities.
+- Keep the implementation local/prototype-friendly.
+- Avoid hosted backend, subscription, enterprise, and full Power Mode work in this pass.
+- Prepare names, data structures, and tests so the later capability runtime does not need to undo prototype decisions.
+
+### 4A.1 Two-Surface Sonny Product Model
+
+Add a full Mac app companion to the menu-bar popover.
+
+Menu-bar popover remains the agent cockpit:
+
+- Ask Sonny.
+- Voice and hotkey.
+- Current plan/task progress.
+- Quick approvals.
+- Power Mode pause/stop later.
+- Recent results.
+- Fast routine/workspace launch.
+
+Full Sonny app becomes the command center:
+
+- Account placeholder and future subscription surface.
+- Settings.
+- Permission center.
+- Privacy controls.
+- Data Sent To AI history.
+- Routine editor.
+- Workspace editor.
+- Usage and impact stats.
+- Power Mode app approvals later.
+- Enterprise/admin controls later.
+
+Initial stats should not feel like surveillance. Track useful aggregate work outcomes, not invasive app monitoring.
+
+Good stats:
+
+- Tasks completed.
+- Estimated time saved.
+- Files organized, zipped, converted, or summarized.
+- Web research notes created.
+- Routines run.
+- Workspaces opened.
+- Apps opened or controlled.
+- Power Mode sessions later.
+- Approvals requested/granted/denied.
+- Failed steps recovered.
+- Artifacts created.
+- Context packets sent to AI.
+- Redactions applied.
+- Sensitive actions blocked.
+- Most-used workflows.
+
+Avoid:
+
+- Always-on app usage tracking.
+- Productivity scoring.
+- Raw screen/audio history.
+- Storing platform usage in a way that feels like employee monitoring.
+
+### 4A.2 General Web-To-Markdown Capability
+
+Replace the Hacker News-specific workflow with a generic web research and Markdown capability. Hacker News should remain as a preset/source adapter, not the only source.
+
+New generalized capabilities:
+
+- Fetch URL.
+- Search web through a configured search provider or hosted search later.
+- Extract readable article/page content.
+- Extract title, author, date, headings, links, images metadata, and citations where available.
+- Summarize page or search results.
+- Save Markdown.
+- Save comparison Markdown from multiple sources.
+- Open generated Markdown.
+- Reveal generated Markdown in Finder.
+
+Supported inputs:
+
+- Direct URL.
+- Natural-language topic.
+- Search query.
+- Active browser page.
+- Multiple URLs.
+- Existing HN workflow as `source=hacker_news`.
+
+Example commands:
+
+- "Open this article, summarize it, and save it as Markdown."
+- "Research three alternatives to Raycast and save a comparison."
+- "Grab the top 5 posts from Hacker News and save them to Markdown."
+- "Turn this web page into clean notes."
+- "Find recent articles about Mac AI agents and save the best links."
+
+Implementation direction for the pre-major-release pass:
+
+- Introduce a generic `web_research` or `web_to_markdown` operation family.
+- Keep HN as a specialized provider because its official/public API is reliable.
+- Use URLSession for basic public pages.
+- Use a real HTML parser/readability-style extraction instead of ad hoc string slicing.
+- Store source URLs and retrieval timestamps in the Markdown.
+- Mark web content as untrusted observed content in prompts and logs.
+- Require user confirmation or explicit command before using logged-in/private active browser content.
+- Do not bypass paywalls, CAPTCHAs, robots restrictions, or login walls.
+
+Acceptance criteria:
+
+- Existing HN dry-run and run flows still work.
+- A direct public article URL can be summarized into Markdown.
+- A search/topic command can produce a Markdown research note with source links.
+- Malicious page text such as "ignore prior instructions" is treated as content, not instruction.
+- Markdown contains source links and a generation timestamp.
+
+### 4A.3 General App And Website Action Foundation
+
+Generalize current app/URL opening without pretending to support arbitrary app automation yet.
+
+Pre-major-release app action model:
+
+- App catalog remains allowlisted by bundle ID.
+- Website shortcuts remain allowlisted or URL-validated.
+- App actions are declared as small adapters, not scattered conditionals.
+- Each adapter declares supported actions, required permissions, risk level, and fallback behavior.
+
+Initial action types:
+
+- Open app.
+- Open URL.
+- Open app search URL.
+- Open workspace.
+- Create local draft where supported.
+- Reveal file/folder.
+- Open generated artifact.
+
+Examples:
+
+- "Open Gmail."
+- "Open GitHub issues for this repo."
+- "Open Spotify and search for Jimmy Cooks."
+- "Open Apple Music and search for SZA."
+- "Open my writing workspace."
+
+Important constraint:
+
+- This pass should not add unrestricted UI control. App-specific control belongs to the later Power Mode work.
+
+### 4A.4 Real Music Playback Strategy
+
+Current prototype behavior opens Apple Music or Spotify results but does not reliably play the requested track. The pre-major-release pass should convert this into a provider-aware media capability with graceful fallbacks.
+
+Target command:
+
+- "Play Jimmy Cooks by Drake on Apple Music."
+- "Play Father Stretch My Hands by Kanye West on Spotify."
+- "Play the album Her Loss on Apple Music."
+
+Spotify implementation strategy:
+
+- Use Spotify OAuth with Authorization Code + PKCE.
+- Request playback scopes such as `user-modify-playback-state`; add read scopes only when needed for devices/current playback.
+- Search for track/album/artist through Spotify Web API.
+- Resolve the best matching track URI using title, artist, album, duration, and market.
+- Get available devices and choose active device when possible.
+- If needed, transfer playback to the current Mac/Spotify client.
+- Start playback through Spotify Web API `PUT /v1/me/player/play`.
+- Use `uris` for exact track playback.
+- Use `context_uri` plus `offset` for album/playlist playback.
+- Surface Spotify Premium requirement clearly because Spotify's playback endpoint only works for Premium users.
+- If API playback fails because there is no active device, open Spotify to the exact track/album URI and tell the user what is missing.
+
+Apple Music implementation strategy:
+
+- Use MusicKit where possible rather than UI clicking.
+- Request Apple Music authorization.
+- Search catalog using MusicKit or Apple Music API search.
+- Resolve best matching song/album using title, artist, album, duration, and storefront.
+- Queue the resolved item in `ApplicationMusicPlayer` and call play.
+- Require Apple Music subscription where playback requires it.
+- Use Music app AppleScript only as a local-library fallback for tracks already in the user's library.
+- If catalog playback cannot be authorized or confirmed, open the exact Apple Music result and explain the limitation.
+
+Do not use Power Mode as the primary media strategy:
+
+- Clicking around Apple Music/Spotify UI is brittle.
+- Provider APIs give cleaner success/failure states.
+- UI control can be a future fallback only when the user explicitly enables Power Mode for that app.
+
+Acceptance criteria:
+
+- Existing result-opening behavior still works as fallback.
+- Spotify can play an exact track when the user has connected Spotify, has Premium, and has an active device.
+- Apple Music can play or queue an exact track when MusicKit authorization/subscription is available.
+- Sonny explains provider limitations clearly.
+- Dry-run previews whether the action will search, play, transfer playback, or open fallback.
+
+### 4A.5 Prototype Generalization Test Plan
+
+Before starting the major-release roadmap, run regression and generalization tests:
+
+- Existing largest-files zip dry-run and run.
+- Existing DOCX conversion dry-run and run.
+- Existing HN Markdown dry-run and run.
+- New generic URL-to-Markdown dry-run and run.
+- New topic/search-to-Markdown dry-run and run.
+- URL validation and prompt-injection page fixture.
+- Existing app opening.
+- Generic website opening.
+- Existing routine/workspace flows.
+- Media search fallback.
+- Spotify playback success/failure with mocked OAuth/API.
+- Apple Music playback success/failure with injected MusicKit adapter.
+- No Power Mode or hosted-backend assumptions introduced.
+
 ## 5. V1 Product Requirements
 
 ### 5.1 V1 Positioning
@@ -265,10 +498,14 @@ Mac power users:
 Sonny v1 is successful if:
 
 - A new user can install, understand permissions, and complete a useful workflow in under 10 minutes.
+- The menu-bar cockpit feels instant for command/task execution.
+- The full Sonny Command Center makes account, settings, permissions, privacy, history, stats, routines, workspaces, and Power Mode controls easy to understand.
 - Screen context works reliably enough to feel magical but controlled.
 - Power Mode can safely operate approved apps in common workflows.
 - Users can see what Sonny captured, sent, and did.
 - Browser/research and local file/document workflows feel polished.
+- General web-to-Markdown workflows work beyond Hacker News.
+- Music playback works through provider APIs where supported, with clear fallback when provider requirements are missing.
 - The agent recovers gracefully from failed steps.
 - Paid users understand why Sonny is worth a subscription.
 - The product does not feel vibe-coded, brittle, or security-naive.
@@ -314,7 +551,8 @@ Implementation notes:
 Required capabilities:
 
 - Native SwiftUI/AppKit app.
-- Menu bar and command surface.
+- Menu-bar cockpit for fast command/task interaction.
+- Full Sonny Command Center app for account, settings, privacy, stats, history, routines, workspaces, permissions, and Power Mode controls.
 - Voice input and hotkey input.
 - Screen capture and selected-region capture.
 - Active window/app metadata.
@@ -328,6 +566,7 @@ Required capabilities:
 - Action timeline UI.
 - Emergency stop UI.
 - Background task progress UI.
+- Usage and impact stats that are local-first, aggregate, and user-controllable.
 
 The Mac client is the trust boundary. It must reject any unsafe server/model request even if the hosted agent asks for it.
 
@@ -351,6 +590,42 @@ Behavior:
 - Voice commands should transcribe, show transcript, and run low-risk actions without extra execute clicks.
 - Medium/high-risk voice tasks must pause for approval.
 - Selection context should be explicit and shown in the timeline.
+
+### 6.3A Sonny Command Center
+
+V1 should not be only a floating widget. Sonny needs a full Mac app companion so the product has a serious home for settings, privacy, account, history, and workflow management.
+
+Menu-bar cockpit responsibilities:
+
+- Start tasks.
+- Speak or type.
+- Show the live current task.
+- Show quick approvals.
+- Show final outputs and next actions.
+- Pause/stop Power Mode later.
+
+Command Center responsibilities:
+
+- Account and subscription.
+- Billing portal access.
+- Settings.
+- Permission center.
+- Privacy controls.
+- Data Sent To AI history.
+- Agent activity timeline.
+- Usage and impact stats.
+- Routine editor.
+- Workspace editor.
+- App approval controls for Power Mode.
+- Enterprise/admin controls later.
+
+Stats and activity principles:
+
+- Track useful work outcomes, not surveillance.
+- Aggregate locally where possible.
+- Let users disable or delete history.
+- Make any server-synced analytics explicit.
+- Do not store raw screen/audio history for stats.
 
 ### 6.4 Screen-Aware Context
 
@@ -433,14 +708,18 @@ Required capabilities:
 - Open safe URLs.
 - Search the web through hosted agent or approved search provider.
 - Capture active browser page.
+- Fetch and parse public web pages from arbitrary safe `http`/`https` URLs.
+- Convert public web pages, active browser pages, and search results into Markdown notes.
 - Summarize page.
 - Extract links.
 - Extract tables/lists.
+- Extract citations and source metadata.
 - Compare multiple pages or tabs when context is provided.
 - Save research notes to Markdown/PDF/doc.
 - Create browser research workspaces.
 - Open generated artifacts.
 - Reveal generated artifacts in Finder.
+- Preserve Hacker News as a specialized source adapter, not a one-off workflow.
 
 Example tasks:
 
@@ -449,12 +728,16 @@ Example tasks:
 - "Extract the links from this page."
 - "Open GitHub and start my research workspace."
 - "Compare these two pages."
+- "Turn this URL into a Markdown brief."
+- "Find current writing about AI Mac agents and save the best sources."
 
 Safety:
 
 - Webpage content is untrusted.
 - Hidden webpage instructions must not override user intent.
 - External posting, purchasing, emailing, or uploading requires approval.
+- Sonny must not bypass paywalls, CAPTCHAs, login walls, or robots restrictions.
+- Logged-in/private browser page extraction must require explicit user context selection and must show in Data Sent To AI.
 
 ### 6.7 Local File And Document Workflows
 
@@ -1611,6 +1894,8 @@ Capabilities:
 - Open URL.
 - Search web.
 - Capture active page.
+- Fetch arbitrary public `http`/`https` pages.
+- Extract readable page content.
 - Summarize page.
 - Extract links.
 - Extract citations.
@@ -1618,12 +1903,16 @@ Capabilities:
 - Save Markdown.
 - Save PDF.
 - Create research workspace.
+- Preserve source URLs and retrieval timestamps.
+- Keep Hacker News as a provider preset under the general web research system.
 
 Acceptance examples:
 
 - User can research a product category and save a comparison document.
 - User can summarize the active page and save to Notes/Markdown.
 - User can collect links from a page.
+- User can turn a direct URL into a Markdown brief.
+- User can run the old Hacker News workflow through the same generalized web-to-Markdown capability.
 
 ### 18.2 Files/Documents
 
@@ -1679,6 +1968,33 @@ For VS Code and developer users:
 Avoid in v1:
 
 - Agent editing codebases autonomously inside Sonny unless this becomes a separate product path.
+
+### 18.5 Media Playback
+
+Media should graduate from opening search results to provider-aware playback where the provider allows it.
+
+Capabilities:
+
+- Search Apple Music catalog.
+- Search Spotify catalog.
+- Resolve exact track/album/artist matches.
+- Play exact Spotify track/album through Spotify Web API when the user has connected Spotify, granted playback scope, has Premium, and has an active device.
+- Play exact Apple Music track/album through MusicKit when the user has granted authorization and has playback entitlement/subscription.
+- Open exact provider result as fallback when playback is not authorized or unavailable.
+- Explain provider-specific limitations in the final summary.
+
+Acceptance examples:
+
+- User can say "Play Jimmy Cooks by Drake on Spotify" and Sonny starts the exact track when Spotify requirements are met.
+- User can say "Play SZA on Apple Music" and Sonny queues/plays the best matching catalog result when MusicKit requirements are met.
+- If playback cannot start, Sonny opens the exact result and states whether the blocker is authorization, subscription, active device, or provider limitation.
+
+Implementation notes:
+
+- Spotify playback should use OAuth + PKCE, catalog search, device lookup/transfer when needed, and `PUT /v1/me/player/play`.
+- Apple Music playback should use MusicKit catalog search and `ApplicationMusicPlayer` where possible.
+- Music app AppleScript is only a local-library fallback, not the primary strategy for catalog playback.
+- Power Mode UI clicking should not be the primary playback mechanism.
 
 ## 19. Release Plan
 
@@ -1918,7 +2234,51 @@ Before public release:
 - Update flow.
 - Crash recovery.
 
+### 20.8 Pre-Major-Release Generalization Tests
+
+Before starting hosted-agent and Power Mode implementation:
+
+- Existing HN workflow still saves Markdown.
+- Generic direct URL saves Markdown with source metadata.
+- Generic topic/search request saves Markdown with source links.
+- Malicious webpage instruction text is treated as untrusted content.
+- Existing safe URL opening still works.
+- Existing app opening still works.
+- New app/website adapter definitions reject unsupported actions.
+- Existing media result opening still works as fallback.
+- Spotify playback adapter handles success, no Premium, no active device, missing OAuth scope, and API rate-limit states.
+- Apple Music adapter handles authorized playback, missing authorization, missing subscription, no exact match, and local-library fallback states.
+- Command Center stats update from task completion without storing raw screen/audio.
+- User can delete local activity/history.
+
 ## 21. Implementation Workstreams
+
+### 21.0 Workstream 0: Pre-Major-Release Generalization
+
+Goals:
+
+- Make existing prototype capabilities more general before the large hosted-agent implementation begins.
+- Keep the current local prototype stable while removing narrow one-off behavior.
+
+Deliverables:
+
+- Menu-bar cockpit plus full Sonny Command Center shell.
+- Usage/impact stats model with privacy-safe defaults.
+- General web-to-Markdown capability replacing HN-only behavior.
+- HN retained as a provider preset.
+- Generic app/website adapter foundation.
+- Provider-aware media playback plan implemented behind adapters.
+- Spotify playback through OAuth/API with clear Premium/device fallback.
+- Apple Music playback through MusicKit where available with exact-result fallback.
+- Regression tests for every existing prototype feature.
+
+Exit criteria:
+
+- Existing zip, DOCX, HN, app opening, URL opening, routines, workspaces, voice, and hotkey flows still work.
+- A public URL can become a Markdown brief.
+- A topic/search command can become a Markdown research note with sources.
+- Media playback either starts correctly or explains the provider blocker.
+- No hosted backend, subscription, enterprise, or full Power Mode dependency is introduced yet.
 
 ### 21.1 Workstream A: Productization Of Current Mac App
 
@@ -1933,9 +2293,11 @@ Deliverables:
 
 - Signed/notarizable app target.
 - Settings window.
+- Full Sonny Command Center app surface.
 - Account state.
 - Permission center upgrade.
 - Local encrypted storage.
+- Privacy-safe usage and impact stats.
 - Update mechanism plan or implementation.
 
 ### 21.2 Workstream B: Hosted Backend
@@ -2045,8 +2407,11 @@ Deliverables:
 
 - Browser capture/summarize/save.
 - Research notes.
+- General web-to-Markdown.
+- Search/topic-to-Markdown.
 - Downloads cleanup.
 - Document summarization.
+- Media playback adapters.
 - Notes/reminders/calendar drafts.
 - Routine/workspace v2.
 
@@ -2169,6 +2534,8 @@ Current product direction:
 - Sonny is not a chatbot, wrapper, local-only script runner, or hardcoded bot.
 - Sonny should be a proper AI-native Mac agent.
 - Hosted AI is the brain; the native Mac app is the trusted actuator.
+- The menu-bar popover is the agent cockpit; the full Sonny app is the Command Center for account, settings, privacy, stats, routines, workspaces, permissions, and Power Mode controls.
+- Before the full major-release roadmap, preserve and generalize existing prototype features: generic web-to-Markdown, generic app/website adapters, and provider-aware media playback.
 - Power Mode is paid-only, off by default, approved-app scoped, and risk-gated.
 - Privacy headline: hosted AI with local-first protection.
 - V1 must cover both browser/research workflows and local file/document workflows with polish.
@@ -2219,6 +2586,11 @@ Before calling a feature done:
 - Apple App Review Guidelines: https://developer.apple.com/app-store/review/guidelines/
 - OWASP Prompt Injection: https://genai.owasp.org/llmrisk/llm01-prompt-injection/
 - OWASP Excessive Agency: https://genai.owasp.org/llmrisk/llm062025-excessive-agency/
+- Spotify Start/Resume Playback: https://developer.spotify.com/documentation/web-api/reference/start-a-users-playback
+- Spotify Authorization: https://developer.spotify.com/documentation/web-api/concepts/authorization
+- Apple MusicKit: https://developer.apple.com/documentation/musickit
+- Apple MusicKit ApplicationMusicPlayer: https://developer.apple.com/documentation/musickit/applicationmusicplayer
+- Apple MusicKit catalog search: https://developer.apple.com/documentation/musickit/musiccatalogsearchrequest
 
 ## 26. Non-Negotiables
 
@@ -2232,4 +2604,6 @@ Before calling a feature done:
 - Sonny must pause for high-risk actions.
 - Sonny must make privacy visible in the UI.
 - Sonny must preserve tasteful product quality.
-
+- Sonny must not leave the menu-bar widget as the only product surface.
+- Sonny must generalize prototype features before pretending the major-release architecture is ready.
+- Sonny must use provider APIs for media playback where possible and explain fallbacks clearly.
