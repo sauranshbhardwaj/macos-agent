@@ -565,7 +565,8 @@ Requirements:
 - A capability family that resolves entirely locally, with zero network calls and a sub-100ms target latency (§20.1A).
 - Initial scope: clipboard history, snippet expansion, basic calculator/unit conversion, quick app search/switch, recent Sonny artifacts/results, and quick routine/workspace launch.
 - Product constraint: this tier should provide expected baseline utility and daily habit formation without becoming a Raycast clone or extension marketplace. Sonny's differentiators remain agentic context, trust, execution, and artifacts (§2.4).
-- Explicitly distinct from the agent loop — no planner round trip, no risk tier beyond tier 0/informational, no confirmation friction.
+- Explicitly distinct from the agent loop for tier-0 utilities — no planner round trip, no risk tier beyond tier 0/informational, no confirmation friction.
+- Quick routine/workspace launch can skip the natural-language planner round trip when the user selects a known saved item, but this does **not** lower the risk tier of the launched content. Workspace launch remains low-friction because opening approved apps/safe URLs is already tier 1 (§11.2). Routine launch is instant only at selection/dispatch time: each routine step still passes normal capability schema validation, permission checks, dynamic risk escalation (§11.1A), and approval gates (§11.2). A routine containing tier 2 or tier 3 actions pauses exactly as it would when run through the standard agent loop.
 - Built as adapters under §4A.0 like everything else, so the same capability contract applies even though execution is instant.
 
 Acceptance criteria:
@@ -1116,7 +1117,7 @@ Foundations:
 
 ### 6.16 Instant Utility Tier (added v1.2)
 
-Formal v1 requirement version of §4A.6. Fast, local, non-agentic actions — including clipboard history, snippet expansion, calculator/unit conversion, quick app search/switch, recent Sonny artifacts/results, and quick routine/workspace launch — that never touch the network or the model planner, meeting the latency budget in §20.1A. Exists specifically to avoid losing daily-habit formation to Raycast/Alfred/Spotlight (§2.3) for the large share of interactions that don't need a full agent loop, while preserving Sonny's differentiation rather than becoming a Raycast clone (§2.4).
+Formal v1 requirement version of §4A.6. Fast, local, non-agentic actions — including clipboard history, snippet expansion, calculator/unit conversion, quick app search/switch, recent Sonny artifacts/results, and quick routine/workspace launch — that never touch the network or the model planner, meeting the latency budget in §20.1A. Exists specifically to avoid losing daily-habit formation to Raycast/Alfred/Spotlight (§2.3) for the large share of interactions that don't need a full agent loop, while preserving Sonny's differentiation rather than becoming a Raycast clone (§2.4). Quick routine launch is instant only at selection/dispatch time; execution of the routine's steps follows the normal routine/capability risk pipeline, including validation, dynamic escalation, and approval gates.
 
 ### 6.17 Shortcuts.app Integration (added v1.2)
 
@@ -2273,7 +2274,7 @@ Rule:
 
 ### 18.7 Instant Utility Actions (added v1.2)
 
-See §4A.6/§6.16 for full requirements. Listed here for completeness of the workflow library: clipboard history, snippet expansion, calculator/unit conversion, quick app search/switch, recent Sonny artifacts/results, and quick routine/workspace launch — all zero-network, sub-100ms, tier 0. This tier exists to preserve daily utility while Sonny's differentiators remain agentic context, execution, trust, and artifacts (§2.4).
+See §4A.6/§6.16 for full requirements. Listed here for completeness of the workflow library: clipboard history, snippet expansion, calculator/unit conversion, quick app search/switch, recent Sonny artifacts/results, and quick workspace launch are zero-network, sub-100ms, tier 0/1 as appropriate under §11. Quick routine launch is zero-network and plannerless for dispatch, but the routine's steps inherit their own risk tiers and must pass the normal validation, dynamic escalation, and approval pipeline before execution. This tier exists to preserve daily utility while Sonny's differentiators remain agentic context, execution, trust, and artifacts (§2.4).
 
 ### 18.8 Shortcuts Bridge (added v1.2)
 
