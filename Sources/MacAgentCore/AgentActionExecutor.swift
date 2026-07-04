@@ -142,13 +142,13 @@ public final class AgentActionExecutor {
         case .permissionReadiness:
             return try previewCapability(for: .showPermissionReadiness, plan: plan)
         case .saveRoutine:
-            return [try previewSaveRoutine(plan)]
+            return try previewCapability(for: .saveRoutine, plan: plan)
         case .runRoutine:
-            return try previewRunRoutine(plan)
+            return try previewCapability(for: .runRoutine, plan: plan)
         case .createWorkspace:
-            return [try previewCreateWorkspace(plan)]
+            return try previewCapability(for: .createWorkspace, plan: plan)
         case .openWorkspace:
-            return [try previewOpenWorkspace(plan)]
+            return try previewCapability(for: .openWorkspace, plan: plan)
         case .chain:
             return try previewChain(plan)
         }
@@ -160,7 +160,6 @@ public final class AgentActionExecutor {
     ) async throws -> AgentRunResult {
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
         let workflow = try workflow(in: resolvedPlan)
-        let previews = { try self.preview(plan: resolvedPlan) }
 
         switch workflow {
         case .clarify:
@@ -184,16 +183,13 @@ public final class AgentActionExecutor {
         case .permissionReadiness:
             return try await executeCapability(for: .showPermissionReadiness, plan: resolvedPlan, log: log)
         case .saveRoutine:
-            let summary = try executeSaveRoutine(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .saveRoutine, plan: resolvedPlan, log: log)
         case .runRoutine:
-            return try await executeRunRoutine(resolvedPlan, log: log)
+            return try await executeCapability(for: .runRoutine, plan: resolvedPlan, log: log)
         case .createWorkspace:
-            let summary = try executeCreateWorkspace(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .createWorkspace, plan: resolvedPlan, log: log)
         case .openWorkspace:
-            let summary = try await executeOpenWorkspace(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .openWorkspace, plan: resolvedPlan, log: log)
         case .chain:
             return try await executeChain(resolvedPlan, log: log)
         }
@@ -363,110 +359,23 @@ public final class AgentActionExecutor {
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             permissionReadinessService: permissionReadinessService,
+            routineStore: routineStore,
+            workspaceStore: workspaceStore,
             fileManager: fileManager,
-            now: now
+            now: now,
+            previewNestedPlan: { [weak self] plan in
+                guard let self else {
+                    throw AgentExecutionError.invalidPlan("Executor is unavailable for nested preview.")
+                }
+                return try self.preview(plan: plan)
+            },
+            executeNestedPlan: { [weak self] plan, log in
+                guard let self else {
+                    throw AgentExecutionError.invalidPlan("Executor is unavailable for nested execution.")
+                }
+                return try await self.execute(plan: plan, log: log)
+            }
         )
-    }
-
-    private func previewSaveRoutine(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try routineSaveSpec(plan)
-        let nestedPreview = try preview(plan: spec.routine.plan)
-        return ActionPreview(
-            title: "Save routine \(spec.routine.name)",
-            details: ["Steps: \(spec.routine.steps.count)"] + nestedPreview.map { "Will include: \($0.title)" },
-            writes: [routineStore.fileURL.path]
-        )
-    }
-
-    private func executeSaveRoutine(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) throws -> String {
-        let spec = try routineSaveSpec(plan)
-        log(.act, "Saving routine \(spec.routine.name)")
-        try routineStore.save(spec.routine)
-        log(.summarize, "Saved routine")
-        return "Saved routine \(spec.routine.name) with \(spec.routine.steps.count) step(s)."
-    }
-
-    private func previewRunRoutine(_ plan: AgentPlan) throws -> [ActionPreview] {
-        let routine = try routineRunSpec(plan)
-        let nested = try preview(plan: routine.plan)
-        return [
-            ActionPreview(
-                title: "Run routine \(routine.name)",
-                details: ["Saved steps: \(routine.steps.count)"]
-            )
-        ] + nested
-    }
-
-    private func executeRunRoutine(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> AgentRunResult {
-        let routine = try routineRunSpec(plan)
-        log(.act, "Running routine \(routine.name)")
-        let result = try await execute(plan: routine.plan, log: log)
-        return AgentRunResult(
-            plan: plan,
-            previews: try previewRunRoutine(plan),
-            summary: "Ran routine \(routine.name). \(result.summary)",
-            suggestions: result.suggestions
-        )
-    }
-
-    private func previewCreateWorkspace(_ plan: AgentPlan) throws -> ActionPreview {
-        let workspace = try workspaceCreateSpec(plan)
-        return ActionPreview(
-            title: "Save workspace \(workspace.name)",
-            details: [
-                "Apps: \(workspace.apps.isEmpty ? "none" : workspace.apps.joined(separator: ", "))",
-                "URLs: \(workspace.urls.isEmpty ? "none" : workspace.urls.joined(separator: ", "))"
-            ],
-            writes: [workspaceStore.fileURL.path]
-        )
-    }
-
-    private func executeCreateWorkspace(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) throws -> String {
-        let workspace = try workspaceCreateSpec(plan)
-        log(.act, "Saving workspace \(workspace.name)")
-        try workspaceStore.save(workspace)
-        log(.summarize, "Saved workspace")
-        return "Saved workspace \(workspace.name) with \(workspace.apps.count) app(s) and \(workspace.urls.count) URL(s)."
-    }
-
-    private func previewOpenWorkspace(_ plan: AgentPlan) throws -> ActionPreview {
-        let workspace = try workspaceRunSpec(plan)
-        return ActionPreview(
-            title: "Open workspace \(workspace.name)",
-            details: [
-                "Apps: \(workspace.apps.isEmpty ? "none" : workspace.apps.joined(separator: ", "))",
-                "URLs: \(workspace.urls.isEmpty ? "none" : workspace.urls.joined(separator: ", "))"
-            ],
-            opens: workspace.apps + workspace.urls
-        )
-    }
-
-    private func executeOpenWorkspace(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let workspace = try workspaceRunSpec(plan)
-        for appName in workspace.apps {
-            let app = try appCatalog.resolve(appName)
-            log(.act, "Opening \(app.displayName)")
-            try await appOpener.open(bundleIdentifier: app.bundleIdentifier)
-        }
-        for rawURL in workspace.urls {
-            let url = try SafeURL.validateWebURL(rawURL)
-            log(.act, "Opening \(url.absoluteString)")
-            try await browserOpener.open(url)
-        }
-        log(.summarize, "Opened workspace")
-        return "Opened workspace \(workspace.name) with \(workspace.apps.count) app(s) and \(workspace.urls.count) URL(s)."
     }
 
     private func previewChain(_ plan: AgentPlan) throws -> [ActionPreview] {
@@ -570,89 +479,6 @@ public final class AgentActionExecutor {
         var resolved = plan
         resolved.steps[0].outputPath = previousArtifactPath
         return resolved
-    }
-
-    private struct RoutineSaveSpec {
-        var routine: StoredRoutine
-    }
-
-    private func routineSaveSpec(_ plan: AgentPlan) throws -> RoutineSaveSpec {
-        guard let step = plan.steps.first(where: { $0.operation == .saveRoutine }) else {
-            throw AgentExecutionError.invalidPlan("save_routine step is missing.")
-        }
-        guard let name = step.routineName?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty else {
-            throw AutomationStoreError.missingName("Routine")
-        }
-        guard let routineSteps = step.routineSteps, !routineSteps.isEmpty else {
-            throw AutomationStoreError.emptyRoutine
-        }
-
-        try validateRoutineSteps(routineSteps)
-        return RoutineSaveSpec(routine: StoredRoutine(name: name, steps: routineSteps))
-    }
-
-    private func routineRunSpec(_ plan: AgentPlan) throws -> StoredRoutine {
-        guard let step = plan.steps.first(where: { $0.operation == .runRoutine }) else {
-            throw AgentExecutionError.invalidPlan("run_routine step is missing.")
-        }
-        return try routineStore.routine(named: step.routineName ?? "")
-    }
-
-    private func validateRoutineSteps(_ steps: [AgentStep]) throws {
-        for step in steps {
-            switch step.operation {
-            case .saveRoutine, .runRoutine, .createWorkspace, .openWorkspace, .clarify, .unsupported:
-                throw AutomationStoreError.unsafeRoutineStep(step.operation.rawValue)
-            default:
-                break
-            }
-
-            if let nested = step.routineSteps, !nested.isEmpty {
-                throw AutomationStoreError.unsafeRoutineStep("nested routineSteps")
-            }
-        }
-
-        _ = try preview(plan: AgentPlan(summary: "Validate routine.", requiresConfirmation: true, steps: steps))
-    }
-
-    private func workspaceCreateSpec(_ plan: AgentPlan) throws -> StoredWorkspace {
-        guard let step = plan.steps.first(where: { $0.operation == .createWorkspace }) else {
-            throw AgentExecutionError.invalidPlan("create_workspace step is missing.")
-        }
-        guard let name = step.workspaceName?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !name.isEmpty else {
-            throw AutomationStoreError.missingName("Workspace")
-        }
-
-        let apps = step.workspaceApps ?? []
-        let urls = step.workspaceURLs ?? []
-        guard !apps.isEmpty || !urls.isEmpty else {
-            throw AutomationStoreError.emptyWorkspace
-        }
-
-        for app in apps {
-            _ = try appCatalog.resolve(app)
-        }
-        for url in urls {
-            _ = try SafeURL.validateWebURL(url)
-        }
-
-        return StoredWorkspace(name: name, apps: apps, urls: urls)
-    }
-
-    private func workspaceRunSpec(_ plan: AgentPlan) throws -> StoredWorkspace {
-        guard let step = plan.steps.first(where: { $0.operation == .openWorkspace }) else {
-            throw AgentExecutionError.invalidPlan("open_workspace step is missing.")
-        }
-        let workspace = try workspaceStore.workspace(named: step.workspaceName ?? "")
-        for app in workspace.apps {
-            _ = try appCatalog.resolve(app)
-        }
-        for url in workspace.urls {
-            _ = try SafeURL.validateWebURL(url)
-        }
-        return workspace
     }
 
 }

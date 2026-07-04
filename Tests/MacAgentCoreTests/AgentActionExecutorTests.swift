@@ -536,6 +536,66 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func routineRunUsesNestedDispatchForMixedChains() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        let appOpener = RecordingAppOpener()
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(
+            root: root,
+            browserOpener: browserOpener,
+            appOpener: appOpener,
+            routineStore: routineStore
+        )
+        let savePlan = AgentPlan(
+            summary: "Teach mixed routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "save-routine",
+                    operation: .saveRoutine,
+                    description: "Save routine.",
+                    routineName: "Mixed Launch",
+                    routineSteps: [
+                        AgentStep(
+                            id: "open-safari",
+                            operation: .openApp,
+                            description: "Open Safari.",
+                            appName: "Safari"
+                        ),
+                        AgentStep(
+                            id: "open-github",
+                            operation: .openURL,
+                            description: "Open GitHub.",
+                            targetURL: "https://github.com"
+                        )
+                    ]
+                )
+            ]
+        )
+        let runPlan = AgentPlan(
+            summary: "Run routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "run-routine",
+                    operation: .runRoutine,
+                    description: "Run routine.",
+                    routineName: "Mixed Launch"
+                )
+            ]
+        )
+
+        _ = try await executor.execute(plan: savePlan) { _, _ in }
+        let result = try await executor.execute(plan: runPlan) { _, _ in }
+
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com"])
+        #expect(result.summary == "Ran routine Mixed Launch. Opened Safari. Opened https://github.com.")
+    }
+
+    @Test
     func workspaceCanBeSavedAndOpened() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

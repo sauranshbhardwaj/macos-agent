@@ -45,6 +45,14 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .revealInFinder) is RevealInFinderCapabilityAdapter)
         #expect(try registry.adapter(for: .showPermissionReadiness).metadata.id == "local.permissions.readiness")
         #expect(try registry.adapter(for: .showPermissionReadiness) is PermissionReadinessCapabilityAdapter)
+        #expect(try registry.adapter(for: .saveRoutine).metadata.id == "local.routines.save")
+        #expect(try registry.adapter(for: .saveRoutine) is SaveRoutineCapabilityAdapter)
+        #expect(try registry.adapter(for: .runRoutine).metadata.id == "local.routines.run")
+        #expect(try registry.adapter(for: .runRoutine) is RunRoutineCapabilityAdapter)
+        #expect(try registry.adapter(for: .createWorkspace).metadata.id == "local.workspaces.create")
+        #expect(try registry.adapter(for: .createWorkspace) is CreateWorkspaceCapabilityAdapter)
+        #expect(try registry.adapter(for: .openWorkspace).metadata.id == "local.workspaces.open")
+        #expect(try registry.adapter(for: .openWorkspace) is OpenWorkspaceCapabilityAdapter)
         #expect(throws: CapabilityRegistryError.unsupportedOperation(.unsupported)) {
             _ = try registry.adapter(for: .unsupported)
         }

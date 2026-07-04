@@ -111,6 +111,9 @@ public struct CapabilityMetadata: Equatable, Sendable {
 }
 
 public struct CapabilityExecutionContext {
+    public typealias PreviewNestedPlan = @MainActor (AgentPlan) throws -> [ActionPreview]
+    public typealias ExecuteNestedPlan = @MainActor (AgentPlan, @escaping (AgentPhase, String) -> Void) async throws -> AgentRunResult
+
     public var whitelist: PathWhitelist
     public var inventory: FileInventory
     public var zipArchiver: any ZipArchiving
@@ -122,8 +125,12 @@ public struct CapabilityExecutionContext {
     public var mediaOpener: any MediaOpening
     public var finderContextReader: any FinderContextReading
     public var permissionReadinessService: PermissionReadinessService
+    public var routineStore: RoutineStore
+    public var workspaceStore: WorkspaceStore
     public var fileManager: FileManager
     public var now: () -> Date
+    public var previewNestedPlan: PreviewNestedPlan
+    public var executeNestedPlan: ExecuteNestedPlan
 
     public init(
         whitelist: PathWhitelist,
@@ -137,8 +144,12 @@ public struct CapabilityExecutionContext {
         mediaOpener: any MediaOpening,
         finderContextReader: any FinderContextReading,
         permissionReadinessService: PermissionReadinessService,
+        routineStore: RoutineStore,
+        workspaceStore: WorkspaceStore,
         fileManager: FileManager = .default,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        previewNestedPlan: @escaping PreviewNestedPlan,
+        executeNestedPlan: @escaping ExecuteNestedPlan
     ) {
         self.whitelist = whitelist
         self.inventory = inventory
@@ -151,8 +162,12 @@ public struct CapabilityExecutionContext {
         self.mediaOpener = mediaOpener
         self.finderContextReader = finderContextReader
         self.permissionReadinessService = permissionReadinessService
+        self.routineStore = routineStore
+        self.workspaceStore = workspaceStore
         self.fileManager = fileManager
         self.now = now
+        self.previewNestedPlan = previewNestedPlan
+        self.executeNestedPlan = executeNestedPlan
     }
 }
 
