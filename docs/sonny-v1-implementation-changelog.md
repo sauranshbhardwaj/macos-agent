@@ -26,7 +26,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 
 | # | Branch | Spec sections | Status |
 |---|---|---|---|
-| 1 | `feature/capability-adapter-foundation` | §4A.0 | Not started |
+| 1 | `feature/capability-adapter-foundation` | §4A.0 | Complete (pending review) |
 | 2 | `feature/local-risk-approval-engine` | §10, §11, §11.1A | Not started |
 | 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Not started |
 | 4 | `feature/provider-media-playback` | §4A.4 | Not started |
@@ -99,4 +99,88 @@ Start in plan mode. Confirm git status is clean on main, confirm the changelog's
 
 ## Entries
 
-_(none yet — branch 1, `feature/capability-adapter-foundation`, has not started)_
+### Branch: feature/capability-adapter-foundation
+Status: complete
+Date: 2026-07-04
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §4A.0 complete. Forward-compatible metadata placeholders for §10/§11/§11.1A are present, but no risk engine, approval gating, escalation UI, or policy logic was implemented on this branch.
+Files changed:
+- `Sources/MacAgentCore/AgentActionExecutor.swift`
+- `Sources/MacAgentCore/CapabilityAdapter.swift`
+- `Sources/MacAgentCore/CreateWorkspaceCapabilityAdapter.swift`
+- `Sources/MacAgentCore/DefaultCapabilityAdapters.swift`
+- `Sources/MacAgentCore/DocxConversionCapabilityAdapter.swift`
+- `Sources/MacAgentCore/FinderSelectionCapabilityAdapter.swift`
+- `Sources/MacAgentCore/FinderSelectionResolver.swift`
+- `Sources/MacAgentCore/HackerNewsMarkdownCapabilityAdapter.swift`
+- `Sources/MacAgentCore/LargestFilesZipCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenAllowlistedAppCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenMediaResultCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenSafeURLCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenWorkspaceCapabilityAdapter.swift`
+- `Sources/MacAgentCore/PermissionReadinessCapabilityAdapter.swift`
+- `Sources/MacAgentCore/RevealInFinderCapabilityAdapter.swift`
+- `Sources/MacAgentCore/RunRoutineCapabilityAdapter.swift`
+- `Sources/MacAgentCore/SaveRoutineCapabilityAdapter.swift`
+- `Sources/MacAgentCore/ToolRegistry.swift`
+- `Tests/MacAgentCoreTests/AgentActionExecutorTests.swift`
+- `Tests/MacAgentCoreTests/CapabilityRegistryTests.swift`
+- `Tests/MacAgentCoreTests/PlannerBoundaryTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 53 tests in 8 suites.
+
+Behavior added:
+- Added `CapabilityAdapter`, `CapabilityMetadata`, `CapabilityRegistry`, and adapter-backed default tool registration for local Mac capabilities.
+- Added stable capability IDs, display names/descriptions, planner tool metadata, descriptive-only required permissions metadata, default risk-tier placeholders, dry-run behavior descriptions, and local executor location metadata.
+- Added registry/protocol/metadata tests, planner prompt golden tests, tool-registry golden tests, response-format shape tests, and adapter routing coverage.
+
+Behavior preserved (required, no blanket claims):
+- Largest-files zip still scans whitelisted folders, selects the largest regular files, preserves stable default zip output paths between preview and execution, dry-runs without writing, creates zips through the injected archiver, and suggests revealing the generated zip.
+- DOCX conversion still scans whitelisted folders, uses the injected document converter, supports mock destination behavior, skips existing PDF outputs, dry-runs without writing, and suggests revealing the PDF folder.
+- Hacker News Markdown still opens `https://news.ycombinator.com`, fetches headlines via the existing `HackerNewsFetching` service, writes Markdown to the resolved whitelisted output path, dry-runs without writing, and suggests opening/revealing the Markdown file.
+- Safe URL opening still validates through `SafeURL.validateWebURL`, allows only HTTP/HTTPS, rejects unsupported schemes, previews the URL, and executes through the injected browser opener.
+- Allowlisted app opening still resolves apps through `MacAppCatalog`, rejects unknown apps, preserves the bundle-ID allowlist, previews the resolved display name/bundle ID, and executes through the injected app opener.
+- Media result opening still validates provider/title, builds the same `MediaPlaybackRequest`, preserves Apple Music/Spotify behavior-description preview text, executes through the injected media opener, and returns the exact summary from `mediaOpener.open()`.
+- Finder selection still reads selected Finder items through the existing Finder context reader, validates every path through the Desktop/Documents whitelist, previews selected paths, and reports the whitelisted item count on execution.
+- Reveal in Finder still validates paths through the whitelist, allows preview of a future not-yet-created artifact, requires the path to exist during execution, and opens Finder with `NSWorkspace.activateFileViewerSelecting`.
+- Permission readiness still uses `PermissionReadinessService.currentStatus`, previews the same status source used by execution, has no side effects, does not prompt for permissions, and reports required-action items in the existing summary format.
+- Save routine still validates routine names and nested steps, rejects unsafe routine/workspace/clarify/unsupported/nested-routine steps, previews nested steps through normal plan preview, writes to `routineStore.fileURL`, and preserves saved step counts in the summary.
+- Run routine still loads saved routines from `RoutineStore`, previews nested routine plans, executes nested plans through normal executor dispatch, preserves suggestions, and preserves the `Ran routine <name>. ...` summary prefix.
+- Create workspace still validates workspace names, allowlisted apps, safe URLs, non-empty app/URL content, previews `workspaceStore.fileURL`, saves through `WorkspaceStore`, and preserves app/URL counts in the summary.
+- Open workspace still loads from `WorkspaceStore`, validates allowlisted apps and safe URLs, opens apps before URLs, uses the injected app/browser openers, previews the combined opens list, and preserves app/URL counts in the summary.
+- Chained execution still segments composite workflows, resolves reveal-in-Finder steps to the previous produced artifact, preserves the zip-plus-reveal future-artifact preview behavior, and executes each segment through the top-level adapter-backed dispatch.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- `DefaultCapabilityAdapters.all()` now uses real adapters for every executable capability; only `clarify` remains `MetadataOnlyCapabilityAdapter` because clarification is intercepted by `clarificationQuestion()` / `prepare()` before executable dispatch and has no local side-effect executor.
+- Routines need executor recursion because saved routine plans can contain any already-migrated capability or mixed chain. `CapabilityExecutionContext` now carries `previewNestedPlan` and `executeNestedPlan` closures back to the executor so `RunRoutineCapabilityAdapter` and `SaveRoutineCapabilityAdapter` can stay adapter-owned without leaving routine behavior in the switch.
+- `FinderSelectionResolver` was extracted as the shared DRY helper for whitelisted Finder selection and selected-folder resolution; zip and DOCX adapters use it instead of duplicating Finder-selection code.
+- The transitional `previews` closure in `AgentActionExecutor.execute()` was removed once all executable switch cases routed through adapters.
+- Planner/schema behavior was protected with hard golden tests for `ToolRegistry.default.plannerDescription`, `OpenAIPlanner.systemPrompt(toolRegistry: .default)`, and `AgentPlanSchema.responseFormat()`.
+- Required permissions metadata is descriptive-only on this branch. It does not enforce readiness, gate execution, request permissions, or implement branch #2 approval behavior.
+- Chained execution is intentionally not an adapter because it is not tied to one `AgentOperation`; it remains runtime segmentation that calls top-level preview/execute, which now dispatches segment capabilities through the adapter registry.
+- During checkpoint 7 review, a one-off uncaught `NSException` flake appeared in `asyncProcessRunnerCancelsRunningProcess` from an existing `AsyncProcessRunner`/`NSTask` cancellation race. It passed on rerun, `AsyncProcessRunner.swift` was not touched, and it is unrelated/non-blocking for this branch.
+Known limitations / deferred scope:
+- Real risk tiers, dynamic escalation, approval UI, and policy enforcement are deferred to `feature/local-risk-approval-engine`.
+- `clarify` has metadata for planner/tool description purposes but remains pre-dispatch control flow rather than an executable adapter.
+- The existing `AsyncProcessRunner`/`NSTask` cancellation flake described above remains unresolved and should not be treated as a new capability-adapter regression if it reappears.
+Open questions for the next chat (required, write "none" if true): none.
+
+Next branch: `feature/local-risk-approval-engine` (§10, §11, §11.1A), building real risk tiers and dynamic escalation on top of the fully migrated capability adapters.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/local-risk-approval-engine
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §10, §11, §11.1A
+
+Just completed: feature/capability-adapter-foundation — existing prototype capabilities now route through protocol-based local capability adapters with registry-backed metadata while preserving planner/schema boundaries.
+Must preserve: largest-files zip default output stability and dry-run behavior; DOCX injected converter/mock/skip-existing-PDF behavior; Hacker News browser/fetch/Markdown write/reveal behavior; SafeURL HTTP/HTTPS-only validation; MacAppCatalog allowlist rejection; media provider/title validation and injected opener summaries; Finder selection whitelist validation; reveal-in-Finder preview-vs-execute existence distinction; permission readiness read-only semantics; save/run routine behavior; create/open workspace behavior and app-before-URL order; zip-plus-reveal chained execution.
+Known pitfalls to avoid repeating: routines require `previewNestedPlan`/`executeNestedPlan` recursion hooks because saved routines can contain mixed adapter-backed chains; Finder selection should use `FinderSelectionResolver`; do not reintroduce the removed transitional previews closure; required permissions metadata is descriptive-only until this branch defines enforcement; an existing `AsyncProcessRunner`/`NSTask` cancellation flake may appear in tests and is unrelated to adapter work unless reproduced against touched code.
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
