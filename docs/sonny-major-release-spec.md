@@ -2934,21 +2934,23 @@ Before calling a feature done:
 - README/spec updates are made if needed.
 - No commits are made without approval.
 
-### 24.4 Cross-Agent Branch And Review Protocol (added by Hermes review)
+### 24.4 Cross-Agent Branch And Review Protocol (updated 2026-07-04)
 
-The implementation-plan workflow intentionally uses separate branch namespaces so Claude Code and Hermes Agent can work independently, review each other's changes, and preserve rollback points.
+The v1.1/v1.2 planning phase used separate branch namespaces (`claude/implementation-plan`, `hermes/implementation-plan`) so Claude Code and Hermes Agent could draft this spec independently, cross-review, and merge to a canonical `implementation-plan` branch before `main`. That phase is complete and those branches are merged/retired; the naming below reflects the current implementation-phase workflow, not the historical planning phase.
+
+Implementation now uses a single shared branch namespace and a three-agent roster with distinct roles:
+
+- Claude Code and Codex both implement and review feature branches — one agent implements a branch, the other cross-reviews it, and either agent may take either role on a given branch.
+- Hermes is used for strategy, cross-chat prompt handoff, and planning oversight, not direct implementation.
 
 Branch naming:
 
-- Claude planning branch: `claude/implementation-plan`.
-- Hermes planning branch: `hermes/implementation-plan`.
-- Claude feature branches: `claude/feature/<short-feature-name>`.
-- Hermes feature branches: `hermes/feature/<short-feature-name>`.
+- Feature branches: plain `feature/<short-feature-name>`. Do not use `claude/feature/...`, `hermes/feature/...`, or `codex/feature/...` — those per-agent prefixes are retired along with the planning-phase namespaces above.
+- Because the branch name no longer encodes agent identity, every feature branch's changelog entry (`docs/sonny-v1-implementation-changelog.md`) and cross-chat handoff prompt must record `Implementing agent` and `Reviewing agent` explicitly.
 
 Default review rule:
 
-- Claude-authored changes should be reviewed by Hermes where practical.
-- Hermes-authored changes should be reviewed by Claude where practical.
+- Every feature branch should be reviewed by the agent that did not implement it, where practical.
 - Reviews compare the change against this final implementation spec, not just against local code style.
 - Cross-review should be attempted by default, especially for spec changes, architecture changes, security/privacy changes, Power Mode changes, hosted-runtime changes, and any feature that affects user trust.
 
@@ -2966,14 +2968,14 @@ Required review checklist:
 
 Merge flow:
 
-- Planning work may proceed independently on `claude/implementation-plan` and `hermes/implementation-plan`.
-- After review and user approval, the accepted planning changes should be merged into one canonical `implementation-plan` branch.
-- The canonical `implementation-plan` branch is then reviewed as the final source of truth before merging into `main`.
-- Feature branches follow the same pattern: agent-specific branch → cross-agent review → user approval → canonical integration branch or main, depending on the release process.
+- The implementer completes the branch's full scope, runs tests, updates the changelog, and writes a handoff prompt for the next chat.
+- The other agent reviews the branch against this spec, safety/risk/privacy rules, tests, and prototype-regression risk, and reports blocking issues, warnings, suggestions, or looks-good.
+- The implementer addresses findings on the same branch.
+- The user manually tests before approving the merge to `main`.
 
 Rollback principle:
 
-- Agent-specific branches are useful rollback boundaries. Prefer small, reviewable branches over large mixed changes.
+- Feature branches are useful rollback boundaries. Prefer small, reviewable branches over large mixed changes.
 - Do not squash away important review context until the user has approved the final merge strategy.
 - Never commit, push, merge, or open/modify a PR without explicit user approval.
 
