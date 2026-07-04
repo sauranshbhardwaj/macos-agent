@@ -24,6 +24,8 @@ struct CapabilityRegistryTests {
 
         #expect(try registry.adapter(for: .scanSelectLargestFiles).metadata.id == "local.files.largest-files-zip")
         #expect(try registry.adapter(for: .createZip).metadata.id == "local.files.largest-files-zip")
+        #expect(try registry.adapter(for: .scanSelectLargestFiles) is LargestFilesZipCapabilityAdapter)
+        #expect(try registry.adapter(for: .createZip) is LargestFilesZipCapabilityAdapter)
         #expect(try registry.adapter(for: .convertDocxToPDF).metadata.id == "local.documents.docx-to-pdf")
         #expect(try registry.adapter(for: .writeMarkdown).metadata.id == "local.web.hacker-news-markdown")
         #expect(try registry.adapter(for: .openURL).metadata.id == "local.browser.open-url")

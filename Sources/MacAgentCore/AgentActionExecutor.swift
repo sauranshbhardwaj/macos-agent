@@ -58,6 +58,7 @@ public final class AgentActionExecutor {
     private let permissionReadinessService: PermissionReadinessService
     private let routineStore: RoutineStore
     private let workspaceStore: WorkspaceStore
+    private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
     private let now: () -> Date
 
@@ -75,6 +76,7 @@ public final class AgentActionExecutor {
         permissionReadinessService: PermissionReadinessService = PermissionReadinessService(),
         routineStore: RoutineStore = RoutineStore(),
         workspaceStore: WorkspaceStore = WorkspaceStore(),
+        capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
     ) {
@@ -91,6 +93,7 @@ public final class AgentActionExecutor {
         self.permissionReadinessService = permissionReadinessService
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
+        self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
         self.now = now
     }
@@ -122,7 +125,7 @@ public final class AgentActionExecutor {
                 )
             ]
         case .largestFiles:
-            return [try previewLargestFiles(plan)]
+            return try previewCapability(for: .scanSelectLargestFiles, plan: plan)
         case .docx:
             return [try previewDocxConversion(plan)]
         case .hackerNews:
@@ -157,52 +160,51 @@ public final class AgentActionExecutor {
         log: @escaping (AgentPhase, String) -> Void
     ) async throws -> AgentRunResult {
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
-        let previews = try preview(plan: resolvedPlan)
+        let workflow = try workflow(in: resolvedPlan)
+        let previews = { try self.preview(plan: resolvedPlan) }
 
-        switch try workflow(in: resolvedPlan) {
+        switch workflow {
         case .clarify:
             throw AgentExecutionError.missingClarificationQuestion
         case .largestFiles:
-            let summary = try await executeLargestFiles(resolvedPlan, log: log)
-            let suggestions = try largestFileSuggestions(resolvedPlan)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary, suggestions: suggestions)
+            return try await executeCapability(for: .scanSelectLargestFiles, plan: resolvedPlan, log: log)
         case .docx:
             let summary = try await executeDocxConversion(resolvedPlan, log: log)
             let suggestions = try docxSuggestions(resolvedPlan)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary, suggestions: suggestions)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary, suggestions: suggestions)
         case .hackerNews:
             let summary = try await executeHackerNews(resolvedPlan, log: log)
             let suggestions = try hackerNewsSuggestions(resolvedPlan)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary, suggestions: suggestions)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary, suggestions: suggestions)
         case .openApp:
             let summary = try await executeOpenApp(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .openURL:
             let summary = try await executeOpenURL(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .mediaOpen:
             let summary = try await executeMediaOpen(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .finderSelection:
             let summary = try executeFinderSelection(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .revealInFinder:
             let summary = try executeRevealInFinder(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .permissionReadiness:
             let summary = executePermissionReadiness(log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .saveRoutine:
             let summary = try executeSaveRoutine(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .runRoutine:
             return try await executeRunRoutine(resolvedPlan, log: log)
         case .createWorkspace:
             let summary = try executeCreateWorkspace(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .openWorkspace:
             let summary = try await executeOpenWorkspace(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: previews, summary: summary)
+            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
         case .chain:
             return try await executeChain(resolvedPlan, log: log)
         }
@@ -322,11 +324,10 @@ public final class AgentActionExecutor {
         _ = try workflow(in: plan)
         var resolvedPlan = plan
 
-        if let zipIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .createZip }) {
-            let outputPath = resolvedPlan.steps[zipIndex].outputPath?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if outputPath?.isEmpty != false {
-                resolvedPlan.steps[zipIndex].outputPath = try largestFileSpec(resolvedPlan).outputURL.path
-            }
+        if resolvedPlan.steps.contains(where: { $0.operation == .createZip }) {
+            resolvedPlan = try capabilityRegistry
+                .adapter(for: .scanSelectLargestFiles)
+                .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
         }
 
         if let markdownIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .writeMarkdown }) {
@@ -342,38 +343,31 @@ public final class AgentActionExecutor {
         }
     }
 
-    private func previewLargestFiles(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try largestFileSpec(plan)
-        let files = try inventory.largestFiles(in: spec.folder, count: spec.count)
-        guard !files.isEmpty else {
-            throw AgentExecutionError.noMatchingFiles("No regular files were found in \(spec.folder.path).")
-        }
-
-        return ActionPreview(
-            title: "Zip \(files.count) largest files",
-            details: files.map { "\($0.url.pathRelative(to: spec.folder)) (\($0.displaySize))" },
-            writes: [spec.outputURL.path]
-        )
+    private func previewCapability(for operation: AgentOperation, plan: AgentPlan) throws -> [ActionPreview] {
+        try capabilityRegistry
+            .adapter(for: operation)
+            .preview(plan: plan, context: capabilityContext())
     }
 
-    private func executeLargestFiles(
-        _ plan: AgentPlan,
+    private func executeCapability(
+        for operation: AgentOperation,
+        plan: AgentPlan,
         log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let spec = try largestFileSpec(plan)
-        log(.act, "Scanning \(spec.folder.path) for regular files")
-        let files = try inventory.largestFiles(in: spec.folder, count: spec.count)
-        guard !files.isEmpty else {
-            throw AgentExecutionError.noMatchingFiles("No regular files were found in \(spec.folder.path).")
-        }
+    ) async throws -> AgentRunResult {
+        try await capabilityRegistry
+            .adapter(for: operation)
+            .execute(plan: plan, context: capabilityContext(), log: log)
+    }
 
-        log(.observe, "Selected \(files.count) files")
-        let totalBytes = files.reduce(Int64(0)) { $0 + $1.byteCount }
-        let totalSize = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
-        log(.act, "Creating \(spec.outputURL.path) from \(files.count) files (\(totalSize))")
-        try await zipArchiver.createArchive(sourceFolder: spec.folder, files: files.map(\.url), outputURL: spec.outputURL)
-        log(.summarize, "Created zip archive")
-        return "Created \(spec.outputURL.lastPathComponent) with \(files.count) largest files from \(spec.folder.path)."
+    private func capabilityContext() -> CapabilityExecutionContext {
+        CapabilityExecutionContext(
+            whitelist: whitelist,
+            inventory: inventory,
+            zipArchiver: zipArchiver,
+            finderContextReader: finderContextReader,
+            fileManager: fileManager,
+            now: now
+        )
     }
 
     private func previewDocxConversion(_ plan: AgentPlan) throws -> ActionPreview {
@@ -792,17 +786,6 @@ public final class AgentActionExecutor {
         return resolved
     }
 
-    private func largestFileSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
-        let spec = try largestFileSpec(plan)
-        return [
-            RunSuggestion(
-                title: "Reveal zip in Finder",
-                kind: .revealInFinder,
-                value: spec.outputURL.path
-            )
-        ]
-    }
-
     private func docxSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
         let spec = try docxSpec(plan)
         return [
@@ -828,35 +811,6 @@ public final class AgentActionExecutor {
                 value: spec.outputURL.path
             )
         ]
-    }
-
-    private struct LargestFileSpec {
-        var folder: URL
-        var count: Int
-        var outputURL: URL
-    }
-
-    private func largestFileSpec(_ plan: AgentPlan) throws -> LargestFileSpec {
-        let scanStep = plan.steps.first { $0.operation == .scanSelectLargestFiles }
-        let zipStep = plan.steps.first { $0.operation == .createZip }
-        guard let folderPath = try pathOrFinderSelectedDirectory(
-            primary: scanStep?.inputPath,
-            secondary: zipStep?.inputPath,
-            contextSource: scanStep?.contextSource ?? zipStep?.contextSource
-        ) else {
-            throw AgentExecutionError.missingPath("largest file scan")
-        }
-
-        let folder = try whitelist.validateExistingDirectory(folderPath)
-        let count = max(scanStep?.count ?? zipStep?.count ?? 3, 1)
-        let outputURL: URL
-        if let rawOutput = zipStep?.outputPath, !rawOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            outputURL = try whitelist.validateOutputPath(rawOutput)
-        } else {
-            outputURL = folder.appendingPathComponent("largest-files-\(Timestamp.fileSafe(now())).zip")
-        }
-
-        return LargestFileSpec(folder: folder, count: count, outputURL: outputURL)
     }
 
     private struct DocxSpec {

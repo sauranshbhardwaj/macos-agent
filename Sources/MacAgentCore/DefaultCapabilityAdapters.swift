@@ -3,7 +3,7 @@ import Foundation
 public enum DefaultCapabilityAdapters {
     public static func all() -> [any CapabilityAdapter] {
         [
-            MetadataOnlyCapabilityAdapter(metadata: largestFilesZip),
+            LargestFilesZipCapabilityAdapter(),
             MetadataOnlyCapabilityAdapter(metadata: docxConversion),
             MetadataOnlyCapabilityAdapter(metadata: hackerNewsMarkdown),
             MetadataOnlyCapabilityAdapter(metadata: openApp),
@@ -19,37 +19,6 @@ public enum DefaultCapabilityAdapters {
             MetadataOnlyCapabilityAdapter(metadata: clarify)
         ]
     }
-
-    private static let largestFilesZip = CapabilityMetadata(
-        id: "local.files.largest-files-zip",
-        displayName: "Largest files zip",
-        description: "Select the largest regular files in a whitelisted folder and create a zip archive.",
-        operations: [.scanSelectLargestFiles, .createZip],
-        plannerTools: [
-            AgentTool(
-                operation: .scanSelectLargestFiles,
-                name: "Scan and select largest files",
-                description: "Recursively scan a whitelisted folder, skip symlinks, and select the largest regular files.",
-                requiredFields: ["inputPath", "count"],
-                sideEffects: [],
-                dryRunBehavior: "Show the selected files and sizes.",
-                examples: ["Find the 3 largest files in ~/Desktop/MacAgentDemo"]
-            ),
-            AgentTool(
-                operation: .createZip,
-                name: "Create zip archive",
-                description: "Create a timestamped zip archive from the selected largest files.",
-                requiredFields: ["inputPath"],
-                sideEffects: ["write file"],
-                dryRunBehavior: "Show the zip path without writing it.",
-                examples: ["Zip the selected files"]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .desktopDocumentsAccess)
-        ],
-        defaultRiskTier: .tier2
-    )
 
     private static let docxConversion = CapabilityMetadata(
         id: "local.documents.docx-to-pdf",

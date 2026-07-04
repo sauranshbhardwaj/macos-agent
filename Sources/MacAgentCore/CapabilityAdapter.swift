@@ -110,8 +110,29 @@ public struct CapabilityMetadata: Equatable, Sendable {
     }
 }
 
-public struct CapabilityExecutionContext: Sendable {
-    public init() {}
+public struct CapabilityExecutionContext {
+    public var whitelist: PathWhitelist
+    public var inventory: FileInventory
+    public var zipArchiver: any ZipArchiving
+    public var finderContextReader: any FinderContextReading
+    public var fileManager: FileManager
+    public var now: () -> Date
+
+    public init(
+        whitelist: PathWhitelist,
+        inventory: FileInventory,
+        zipArchiver: any ZipArchiving,
+        finderContextReader: any FinderContextReading,
+        fileManager: FileManager = .default,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.whitelist = whitelist
+        self.inventory = inventory
+        self.zipArchiver = zipArchiver
+        self.finderContextReader = finderContextReader
+        self.fileManager = fileManager
+        self.now = now
+    }
 }
 
 public protocol CapabilityAdapter: Sendable {
