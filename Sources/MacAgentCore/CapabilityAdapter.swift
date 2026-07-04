@@ -115,6 +115,8 @@ public struct CapabilityExecutionContext {
     public var inventory: FileInventory
     public var zipArchiver: any ZipArchiving
     public var documentConverter: any DocumentConverting
+    public var browserOpener: any BrowserOpening
+    public var hackerNewsFetcher: any HackerNewsFetching
     public var finderContextReader: any FinderContextReading
     public var fileManager: FileManager
     public var now: () -> Date
@@ -124,6 +126,8 @@ public struct CapabilityExecutionContext {
         inventory: FileInventory,
         zipArchiver: any ZipArchiving,
         documentConverter: any DocumentConverting,
+        browserOpener: any BrowserOpening,
+        hackerNewsFetcher: any HackerNewsFetching,
         finderContextReader: any FinderContextReading,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -132,6 +136,8 @@ public struct CapabilityExecutionContext {
         self.inventory = inventory
         self.zipArchiver = zipArchiver
         self.documentConverter = documentConverter
+        self.browserOpener = browserOpener
+        self.hackerNewsFetcher = hackerNewsFetcher
         self.finderContextReader = finderContextReader
         self.fileManager = fileManager
         self.now = now

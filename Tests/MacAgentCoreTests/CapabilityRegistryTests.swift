@@ -30,6 +30,9 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .scanDocx) is DocxConversionCapabilityAdapter)
         #expect(try registry.adapter(for: .convertDocxToPDF) is DocxConversionCapabilityAdapter)
         #expect(try registry.adapter(for: .writeMarkdown).metadata.id == "local.web.hacker-news-markdown")
+        #expect(try registry.adapter(for: .openHackerNews) is HackerNewsMarkdownCapabilityAdapter)
+        #expect(try registry.adapter(for: .fetchHNHeadlines) is HackerNewsMarkdownCapabilityAdapter)
+        #expect(try registry.adapter(for: .writeMarkdown) is HackerNewsMarkdownCapabilityAdapter)
         #expect(try registry.adapter(for: .openURL).metadata.id == "local.browser.open-url")
         #expect(try registry.adapter(for: .openApp).metadata.id == "local.apps.open-allowlisted-app")
         #expect(throws: CapabilityRegistryError.unsupportedOperation(.unsupported)) {

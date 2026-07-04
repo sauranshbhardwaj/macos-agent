@@ -129,7 +129,7 @@ public final class AgentActionExecutor {
         case .docx:
             return try previewCapability(for: .scanDocx, plan: plan)
         case .hackerNews:
-            return [try previewHackerNews(plan)]
+            return try previewCapability(for: .openHackerNews, plan: plan)
         case .openApp:
             return [try previewOpenApp(plan)]
         case .openURL:
@@ -171,9 +171,7 @@ public final class AgentActionExecutor {
         case .docx:
             return try await executeCapability(for: .scanDocx, plan: resolvedPlan, log: log)
         case .hackerNews:
-            let summary = try await executeHackerNews(resolvedPlan, log: log)
-            let suggestions = try hackerNewsSuggestions(resolvedPlan)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary, suggestions: suggestions)
+            return try await executeCapability(for: .openHackerNews, plan: resolvedPlan, log: log)
         case .openApp:
             let summary = try await executeOpenApp(resolvedPlan, log: log)
             return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
@@ -329,7 +327,9 @@ public final class AgentActionExecutor {
         }
 
         if let markdownIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .writeMarkdown }) {
-            resolvedPlan.steps[markdownIndex].outputPath = try hackerNewsSpec(resolvedPlan).outputURL.path
+            resolvedPlan = try capabilityRegistry
+                .adapter(for: resolvedPlan.steps[markdownIndex].operation)
+                .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
         }
 
         return resolvedPlan
@@ -363,41 +363,12 @@ public final class AgentActionExecutor {
             inventory: inventory,
             zipArchiver: zipArchiver,
             documentConverter: documentConverter,
+            browserOpener: browserOpener,
+            hackerNewsFetcher: hackerNewsFetcher,
             finderContextReader: finderContextReader,
             fileManager: fileManager,
             now: now
         )
-    }
-
-    private func previewHackerNews(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try hackerNewsSpec(plan)
-        return ActionPreview(
-            title: "Fetch Hacker News top \(spec.count)",
-            details: [
-                "Open https://news.ycombinator.com",
-                "Fetch top \(spec.count) headlines",
-                "Save Markdown to \(spec.outputURL.path)"
-            ],
-            writes: [spec.outputURL.path],
-            opens: ["https://news.ycombinator.com"]
-        )
-    }
-
-    private func executeHackerNews(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let spec = try hackerNewsSpec(plan)
-        let hnURL = URL(string: "https://news.ycombinator.com")!
-        log(.act, "Opening Hacker News")
-        try await browserOpener.open(hnURL)
-        log(.act, "Fetching top \(spec.count) headlines")
-        let headlines = try await hackerNewsFetcher.topHeadlines(limit: spec.count)
-        log(.observe, "Fetched \(headlines.count) headlines")
-        let markdown = MarkdownWriter.hackerNewsMarkdown(headlines: headlines, date: now())
-        try markdown.data(using: .utf8)?.write(to: spec.outputURL, options: .atomic)
-        log(.summarize, "Saved Markdown")
-        return "Saved \(headlines.count) Hacker News headlines to \(spec.outputURL.path)."
     }
 
     private func previewOpenApp(_ plan: AgentPlan) throws -> ActionPreview {
@@ -729,27 +700,6 @@ public final class AgentActionExecutor {
         return resolved
     }
 
-    private func hackerNewsSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
-        let spec = try hackerNewsSpec(plan)
-        return [
-            RunSuggestion(
-                title: "Open Markdown",
-                kind: .openFile,
-                value: spec.outputURL.path
-            ),
-            RunSuggestion(
-                title: "Reveal Markdown in Finder",
-                kind: .revealInFinder,
-                value: spec.outputURL.path
-            )
-        ]
-    }
-
-    private struct HackerNewsSpec {
-        var count: Int
-        var outputURL: URL
-    }
-
     private struct AppSpec {
         var app: MacApp
     }
@@ -926,29 +876,4 @@ public final class AgentActionExecutor {
         return permissionReadinessService.currentStatus(hasAPIKey: hasAPIKey, hotKeyReady: true)
     }
 
-    private func hackerNewsSpec(_ plan: AgentPlan) throws -> HackerNewsSpec {
-        let writeStep = plan.steps.first { $0.operation == .writeMarkdown }
-        let fetchStep = plan.steps.first { $0.operation == .fetchHNHeadlines }
-        let count = max(fetchStep?.count ?? writeStep?.count ?? 5, 1)
-
-        let outputURL: URL
-        if let rawOutput = writeStep?.outputPath, !rawOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let expanded = (rawOutput as NSString).expandingTildeInPath
-            if fileManager.fileExists(atPath: expanded) {
-                let url = try whitelist.validateInsideWhitelist(rawOutput)
-                let values = try url.resourceValues(forKeys: [.isDirectoryKey])
-                if values.isDirectory == true {
-                    outputURL = url.appendingPathComponent("hacker-news-\(Timestamp.fileSafe(now())).md")
-                } else {
-                    outputURL = try whitelist.validateOutputPath(rawOutput)
-                }
-            } else {
-                outputURL = try whitelist.validateOutputPath(rawOutput)
-            }
-        } else {
-            outputURL = try whitelist.defaultOutputFile(name: "hacker-news-\(Timestamp.fileSafe(now()))", extension: "md")
-        }
-
-        return HackerNewsSpec(count: count, outputURL: outputURL)
-    }
 }

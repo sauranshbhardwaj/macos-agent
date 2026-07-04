@@ -184,16 +184,23 @@ struct AgentActionExecutorTests {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let output = root.appendingPathComponent("hn.md")
+        let browserOpener = RecordingBrowserOpener()
         let executor = makeExecutor(
             root: root,
-            browserOpener: NoopBrowserOpener(),
+            browserOpener: browserOpener,
             hackerNewsFetcher: StaticHackerNewsFetcher()
         )
 
-        _ = try await executor.execute(plan: hnPlan(output: output)) { _, _ in }
+        let result = try await executor.execute(plan: hnPlan(output: output)) { _, _ in }
 
         let markdown = try String(contentsOf: output)
         #expect(markdown.contains("Fixture headline"))
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://news.ycombinator.com"])
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Reveal Markdown in Finder" &&
+                suggestion.kind == .revealInFinder &&
+                suggestion.value == output.path
+        })
     }
 
     @Test

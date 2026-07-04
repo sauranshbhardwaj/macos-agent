@@ -5,7 +5,7 @@ public enum DefaultCapabilityAdapters {
         [
             LargestFilesZipCapabilityAdapter(),
             DocxConversionCapabilityAdapter(),
-            MetadataOnlyCapabilityAdapter(metadata: hackerNewsMarkdown),
+            HackerNewsMarkdownCapabilityAdapter(),
             MetadataOnlyCapabilityAdapter(metadata: openApp),
             MetadataOnlyCapabilityAdapter(metadata: openURL),
             MetadataOnlyCapabilityAdapter(metadata: mediaOpen),
@@ -19,48 +19,6 @@ public enum DefaultCapabilityAdapters {
             MetadataOnlyCapabilityAdapter(metadata: clarify)
         ]
     }
-
-    private static let hackerNewsMarkdown = CapabilityMetadata(
-        id: "local.web.hacker-news-markdown",
-        displayName: "Hacker News Markdown",
-        description: "Open Hacker News, fetch top headlines, and save them as Markdown.",
-        operations: [.openHackerNews, .fetchHNHeadlines, .writeMarkdown],
-        plannerTools: [
-            AgentTool(
-                operation: .openHackerNews,
-                name: "Open Hacker News",
-                description: "Open Hacker News in the default browser as part of the headline workflow.",
-                requiredFields: [],
-                sideEffects: ["open browser"],
-                dryRunBehavior: "Show that Hacker News would open.",
-                examples: ["Open Hacker News"]
-            ),
-            AgentTool(
-                operation: .fetchHNHeadlines,
-                name: "Fetch Hacker News headlines",
-                description: "Fetch the top Hacker News headlines from the public API.",
-                requiredFields: ["count"],
-                sideEffects: ["network request"],
-                dryRunBehavior: "Show the number of headlines that would be fetched.",
-                examples: ["Grab the top 5 headlines"]
-            ),
-            AgentTool(
-                operation: .writeMarkdown,
-                name: "Write Markdown file",
-                description: "Write fetched Hacker News headlines to Markdown in a whitelisted output path.",
-                requiredFields: [],
-                sideEffects: ["write file"],
-                dryRunBehavior: "Show the Markdown path without writing it.",
-                examples: ["Save to a Markdown file"]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .browserOpening),
-            CapabilityPermissionMetadata(requirement: .networkAccess),
-            CapabilityPermissionMetadata(requirement: .desktopDocumentsAccess)
-        ],
-        defaultRiskTier: .tier2
-    )
 
     private static let openApp = CapabilityMetadata(
         id: "local.apps.open-allowlisted-app",
