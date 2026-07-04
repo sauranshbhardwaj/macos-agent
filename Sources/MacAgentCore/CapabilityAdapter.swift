@@ -117,6 +117,8 @@ public struct CapabilityExecutionContext {
     public var documentConverter: any DocumentConverting
     public var browserOpener: any BrowserOpening
     public var hackerNewsFetcher: any HackerNewsFetching
+    public var appCatalog: MacAppCatalog
+    public var appOpener: any AppOpening
     public var finderContextReader: any FinderContextReading
     public var fileManager: FileManager
     public var now: () -> Date
@@ -128,6 +130,8 @@ public struct CapabilityExecutionContext {
         documentConverter: any DocumentConverting,
         browserOpener: any BrowserOpening,
         hackerNewsFetcher: any HackerNewsFetching,
+        appCatalog: MacAppCatalog,
+        appOpener: any AppOpening,
         finderContextReader: any FinderContextReading,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -138,6 +142,8 @@ public struct CapabilityExecutionContext {
         self.documentConverter = documentConverter
         self.browserOpener = browserOpener
         self.hackerNewsFetcher = hackerNewsFetcher
+        self.appCatalog = appCatalog
+        self.appOpener = appOpener
         self.finderContextReader = finderContextReader
         self.fileManager = fileManager
         self.now = now

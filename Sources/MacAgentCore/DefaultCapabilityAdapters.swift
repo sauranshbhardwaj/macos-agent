@@ -6,8 +6,8 @@ public enum DefaultCapabilityAdapters {
             LargestFilesZipCapabilityAdapter(),
             DocxConversionCapabilityAdapter(),
             HackerNewsMarkdownCapabilityAdapter(),
-            MetadataOnlyCapabilityAdapter(metadata: openApp),
-            MetadataOnlyCapabilityAdapter(metadata: openURL),
+            OpenAllowlistedAppCapabilityAdapter(),
+            OpenSafeURLCapabilityAdapter(),
             MetadataOnlyCapabilityAdapter(metadata: mediaOpen),
             MetadataOnlyCapabilityAdapter(metadata: finderSelection),
             MetadataOnlyCapabilityAdapter(metadata: revealInFinder),
@@ -19,50 +19,6 @@ public enum DefaultCapabilityAdapters {
             MetadataOnlyCapabilityAdapter(metadata: clarify)
         ]
     }
-
-    private static let openApp = CapabilityMetadata(
-        id: "local.apps.open-allowlisted-app",
-        displayName: "Open allowlisted Mac app",
-        description: "Open an app from the local allowlist by human app name.",
-        operations: [.openApp],
-        plannerTools: [
-            AgentTool(
-                operation: .openApp,
-                name: "Open allowlisted Mac app",
-                description: "Open an app from the local allowlist by human app name. Supported apps: \(MacAppCatalog.default.displayList).",
-                requiredFields: ["appName"],
-                sideEffects: ["open app"],
-                dryRunBehavior: "Show the allowlisted app that would open.",
-                examples: ["Open Safari", "Open Spotify", "Launch Apple Music"]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .appOpening)
-        ],
-        defaultRiskTier: .tier1
-    )
-
-    private static let openURL = CapabilityMetadata(
-        id: "local.browser.open-url",
-        displayName: "Open safe web URL",
-        description: "Open a validated http or https URL in the default browser.",
-        operations: [.openURL],
-        plannerTools: [
-            AgentTool(
-                operation: .openURL,
-                name: "Open web URL",
-                description: "Open a safe http or https URL in the default browser.",
-                requiredFields: ["targetURL"],
-                sideEffects: ["open browser"],
-                dryRunBehavior: "Show the URL that would open.",
-                examples: ["Open GitHub", "Open https://gmail.com"]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .browserOpening)
-        ],
-        defaultRiskTier: .tier1
-    )
 
     private static let mediaOpen = CapabilityMetadata(
         id: "local.media.open-result",

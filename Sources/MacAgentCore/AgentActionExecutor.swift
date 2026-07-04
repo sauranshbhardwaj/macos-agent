@@ -131,9 +131,9 @@ public final class AgentActionExecutor {
         case .hackerNews:
             return try previewCapability(for: .openHackerNews, plan: plan)
         case .openApp:
-            return [try previewOpenApp(plan)]
+            return try previewCapability(for: .openApp, plan: plan)
         case .openURL:
-            return [try previewOpenURL(plan)]
+            return try previewCapability(for: .openURL, plan: plan)
         case .mediaOpen:
             return [try previewMediaOpen(plan)]
         case .finderSelection:
@@ -173,11 +173,9 @@ public final class AgentActionExecutor {
         case .hackerNews:
             return try await executeCapability(for: .openHackerNews, plan: resolvedPlan, log: log)
         case .openApp:
-            let summary = try await executeOpenApp(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .openApp, plan: resolvedPlan, log: log)
         case .openURL:
-            let summary = try await executeOpenURL(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .openURL, plan: resolvedPlan, log: log)
         case .mediaOpen:
             let summary = try await executeMediaOpen(resolvedPlan, log: log)
             return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
@@ -365,53 +363,12 @@ public final class AgentActionExecutor {
             documentConverter: documentConverter,
             browserOpener: browserOpener,
             hackerNewsFetcher: hackerNewsFetcher,
+            appCatalog: appCatalog,
+            appOpener: appOpener,
             finderContextReader: finderContextReader,
             fileManager: fileManager,
             now: now
         )
-    }
-
-    private func previewOpenApp(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try appSpec(plan)
-        return ActionPreview(
-            title: "Open \(spec.app.displayName)",
-            details: [
-                "Bundle: \(spec.app.bundleIdentifier)",
-                "Allowed apps: \(appCatalog.displayList)"
-            ],
-            opens: [spec.app.displayName]
-        )
-    }
-
-    private func executeOpenApp(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let spec = try appSpec(plan)
-        log(.act, "Opening \(spec.app.displayName)")
-        try await appOpener.open(bundleIdentifier: spec.app.bundleIdentifier)
-        log(.summarize, "Opened \(spec.app.displayName)")
-        return "Opened \(spec.app.displayName)."
-    }
-
-    private func previewOpenURL(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try urlSpec(plan)
-        return ActionPreview(
-            title: "Open URL",
-            details: ["Open \(spec.url.absoluteString)"],
-            opens: [spec.url.absoluteString]
-        )
-    }
-
-    private func executeOpenURL(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let spec = try urlSpec(plan)
-        log(.act, "Opening \(spec.url.absoluteString)")
-        try await browserOpener.open(spec.url)
-        log(.summarize, "Opened URL")
-        return "Opened \(spec.url.absoluteString)."
     }
 
     private func previewMediaOpen(_ plan: AgentPlan) throws -> ActionPreview {
@@ -700,31 +657,9 @@ public final class AgentActionExecutor {
         return resolved
     }
 
-    private struct AppSpec {
-        var app: MacApp
-    }
-
-    private func appSpec(_ plan: AgentPlan) throws -> AppSpec {
-        guard let step = plan.steps.first(where: { $0.operation == .openApp }) else {
-            throw AgentExecutionError.invalidPlan("open_app step is missing.")
-        }
-        return AppSpec(app: try appCatalog.resolve(step.appName))
-    }
-
-    private struct URLSpec {
-        var url: URL
-    }
-
     private struct MediaSpec {
         var request: MediaPlaybackRequest
         var behaviorDescription: String
-    }
-
-    private func urlSpec(_ plan: AgentPlan) throws -> URLSpec {
-        guard let step = plan.steps.first(where: { $0.operation == .openURL }) else {
-            throw AgentExecutionError.invalidPlan("open_url step is missing.")
-        }
-        return URLSpec(url: try SafeURL.validateWebURL(step.targetURL))
     }
 
     private func mediaSpec(_ plan: AgentPlan) throws -> MediaSpec {

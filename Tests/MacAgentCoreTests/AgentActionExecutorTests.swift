@@ -254,6 +254,23 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func openAppAndURLExecutionUseInjectedOpeners() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let appOpener = RecordingAppOpener()
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(root: root, browserOpener: browserOpener, appOpener: appOpener)
+
+        let appResult = try await executor.execute(plan: openAppPlan(appName: "Safari")) { _, _ in }
+        let urlResult = try await executor.execute(plan: openURLPlan(url: "https://github.com")) { _, _ in }
+
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com"])
+        #expect(appResult.summary == "Opened Safari.")
+        #expect(urlResult.summary == "Opened https://github.com.")
+    }
+
+    @Test
     func mediaOpenPreviewShowsProviderAndSong() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

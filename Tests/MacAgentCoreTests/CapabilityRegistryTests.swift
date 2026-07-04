@@ -34,7 +34,9 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .fetchHNHeadlines) is HackerNewsMarkdownCapabilityAdapter)
         #expect(try registry.adapter(for: .writeMarkdown) is HackerNewsMarkdownCapabilityAdapter)
         #expect(try registry.adapter(for: .openURL).metadata.id == "local.browser.open-url")
+        #expect(try registry.adapter(for: .openURL) is OpenSafeURLCapabilityAdapter)
         #expect(try registry.adapter(for: .openApp).metadata.id == "local.apps.open-allowlisted-app")
+        #expect(try registry.adapter(for: .openApp) is OpenAllowlistedAppCapabilityAdapter)
         #expect(throws: CapabilityRegistryError.unsupportedOperation(.unsupported)) {
             _ = try registry.adapter(for: .unsupported)
         }
