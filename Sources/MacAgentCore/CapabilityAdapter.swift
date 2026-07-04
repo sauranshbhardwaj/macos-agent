@@ -119,6 +119,7 @@ public struct CapabilityExecutionContext {
     public var hackerNewsFetcher: any HackerNewsFetching
     public var appCatalog: MacAppCatalog
     public var appOpener: any AppOpening
+    public var mediaOpener: any MediaOpening
     public var finderContextReader: any FinderContextReading
     public var fileManager: FileManager
     public var now: () -> Date
@@ -132,6 +133,7 @@ public struct CapabilityExecutionContext {
         hackerNewsFetcher: any HackerNewsFetching,
         appCatalog: MacAppCatalog,
         appOpener: any AppOpening,
+        mediaOpener: any MediaOpening,
         finderContextReader: any FinderContextReading,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -144,6 +146,7 @@ public struct CapabilityExecutionContext {
         self.hackerNewsFetcher = hackerNewsFetcher
         self.appCatalog = appCatalog
         self.appOpener = appOpener
+        self.mediaOpener = mediaOpener
         self.finderContextReader = finderContextReader
         self.fileManager = fileManager
         self.now = now

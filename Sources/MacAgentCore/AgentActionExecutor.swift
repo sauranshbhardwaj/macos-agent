@@ -135,7 +135,7 @@ public final class AgentActionExecutor {
         case .openURL:
             return try previewCapability(for: .openURL, plan: plan)
         case .mediaOpen:
-            return [try previewMediaOpen(plan)]
+            return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
             return [try previewFinderSelection(plan)]
         case .revealInFinder:
@@ -177,8 +177,7 @@ public final class AgentActionExecutor {
         case .openURL:
             return try await executeCapability(for: .openURL, plan: resolvedPlan, log: log)
         case .mediaOpen:
-            let summary = try await executeMediaOpen(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
             let summary = try executeFinderSelection(resolvedPlan, log: log)
             return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
@@ -365,33 +364,11 @@ public final class AgentActionExecutor {
             hackerNewsFetcher: hackerNewsFetcher,
             appCatalog: appCatalog,
             appOpener: appOpener,
+            mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             fileManager: fileManager,
             now: now
         )
-    }
-
-    private func previewMediaOpen(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try mediaSpec(plan)
-        return ActionPreview(
-            title: "Open \(spec.request.displayTitle)",
-            details: [
-                "Provider: \(spec.request.provider.displayName)",
-                spec.behaviorDescription
-            ],
-            opens: [spec.request.provider.displayName]
-        )
-    }
-
-    private func executeMediaOpen(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let spec = try mediaSpec(plan)
-        log(.act, "Opening \(spec.request.provider.displayName) result for \(spec.request.displayTitle)")
-        let summary = try await mediaOpener.open(spec.request)
-        log(.summarize, summary)
-        return summary
     }
 
     private func previewFinderSelection(_ plan: AgentPlan) throws -> ActionPreview {
@@ -655,46 +632,6 @@ public final class AgentActionExecutor {
         var resolved = plan
         resolved.steps[0].outputPath = previousArtifactPath
         return resolved
-    }
-
-    private struct MediaSpec {
-        var request: MediaPlaybackRequest
-        var behaviorDescription: String
-    }
-
-    private func mediaSpec(_ plan: AgentPlan) throws -> MediaSpec {
-        guard let step = plan.steps.first(where: { $0.operation == .playMedia }) else {
-            throw AgentExecutionError.invalidPlan("play_media step is missing.")
-        }
-        guard let provider = step.mediaProvider else {
-            throw MediaPlaybackError.missingProvider
-        }
-        guard let rawTitle = step.mediaTitle?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !rawTitle.isEmpty else {
-            throw MediaPlaybackError.missingTitle
-        }
-
-        let artist = step.mediaArtist?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let request = MediaPlaybackRequest(
-            provider: provider,
-            title: rawTitle,
-            artist: artist?.isEmpty == false ? artist : nil,
-            mediaURI: step.targetURL
-        )
-
-        let behavior: String
-        switch provider {
-        case .appleMusic:
-            behavior = "Opens the best matching Apple Music album result, or Apple Music search if no match is found."
-        case .spotify:
-            if let mediaURI = request.mediaURI, !mediaURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                behavior = "Opens the supplied Spotify result URI."
-            } else {
-                behavior = "Opens Spotify search for the requested song or album."
-            }
-        }
-
-        return MediaSpec(request: request, behaviorDescription: behavior)
     }
 
     private func whitelistedFinderSelection() throws -> [URL] {

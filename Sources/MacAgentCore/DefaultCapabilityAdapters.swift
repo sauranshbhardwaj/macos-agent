@@ -8,7 +8,7 @@ public enum DefaultCapabilityAdapters {
             HackerNewsMarkdownCapabilityAdapter(),
             OpenAllowlistedAppCapabilityAdapter(),
             OpenSafeURLCapabilityAdapter(),
-            MetadataOnlyCapabilityAdapter(metadata: mediaOpen),
+            OpenMediaResultCapabilityAdapter(),
             MetadataOnlyCapabilityAdapter(metadata: finderSelection),
             MetadataOnlyCapabilityAdapter(metadata: revealInFinder),
             MetadataOnlyCapabilityAdapter(metadata: permissionReadiness),
@@ -19,32 +19,6 @@ public enum DefaultCapabilityAdapters {
             MetadataOnlyCapabilityAdapter(metadata: clarify)
         ]
     }
-
-    private static let mediaOpen = CapabilityMetadata(
-        id: "local.media.open-result",
-        displayName: "Open music result",
-        description: "Open Apple Music or Spotify result/search URLs without starting playback.",
-        operations: [.playMedia],
-        plannerTools: [
-            AgentTool(
-                operation: .playMedia,
-                name: "Open music result",
-                description: "Open a requested song or album in Apple Music or Spotify without starting playback. Apple Music opens the best matching catalog album result when found, otherwise search. Spotify opens a supplied Spotify result URI or a Spotify search.",
-                requiredFields: ["mediaProvider", "mediaTitle"],
-                sideEffects: ["open music app"],
-                dryRunBehavior: "Show the provider, title, artist, and result/search behavior without opening an app.",
-                examples: [
-                    "Open Jimmy Cooks by Drake on Apple Music",
-                    "Open Bad Habit by Steve Lacy on Spotify"
-                ]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .appOpening),
-            CapabilityPermissionMetadata(requirement: .networkAccess)
-        ],
-        defaultRiskTier: .tier1
-    )
 
     private static let finderSelection = CapabilityMetadata(
         id: "local.finder.read-selection",

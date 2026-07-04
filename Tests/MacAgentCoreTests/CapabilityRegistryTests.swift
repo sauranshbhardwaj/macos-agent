@@ -37,6 +37,8 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .openURL) is OpenSafeURLCapabilityAdapter)
         #expect(try registry.adapter(for: .openApp).metadata.id == "local.apps.open-allowlisted-app")
         #expect(try registry.adapter(for: .openApp) is OpenAllowlistedAppCapabilityAdapter)
+        #expect(try registry.adapter(for: .playMedia).metadata.id == "local.media.open-result")
+        #expect(try registry.adapter(for: .playMedia) is OpenMediaResultCapabilityAdapter)
         #expect(throws: CapabilityRegistryError.unsupportedOperation(.unsupported)) {
             _ = try registry.adapter(for: .unsupported)
         }
