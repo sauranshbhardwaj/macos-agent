@@ -9,9 +9,9 @@ public enum DefaultCapabilityAdapters {
             OpenAllowlistedAppCapabilityAdapter(),
             OpenSafeURLCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),
-            MetadataOnlyCapabilityAdapter(metadata: finderSelection),
-            MetadataOnlyCapabilityAdapter(metadata: revealInFinder),
-            MetadataOnlyCapabilityAdapter(metadata: permissionReadiness),
+            FinderSelectionCapabilityAdapter(),
+            RevealInFinderCapabilityAdapter(),
+            PermissionReadinessCapabilityAdapter(),
             MetadataOnlyCapabilityAdapter(metadata: saveRoutine),
             MetadataOnlyCapabilityAdapter(metadata: runRoutine),
             MetadataOnlyCapabilityAdapter(metadata: createWorkspace),
@@ -19,72 +19,6 @@ public enum DefaultCapabilityAdapters {
             MetadataOnlyCapabilityAdapter(metadata: clarify)
         ]
     }
-
-    private static let finderSelection = CapabilityMetadata(
-        id: "local.finder.read-selection",
-        displayName: "Read Finder selection",
-        description: "Read selected Finder items and validate them against the path whitelist.",
-        operations: [.getFinderSelection],
-        plannerTools: [
-            AgentTool(
-                operation: .getFinderSelection,
-                name: "Read Finder selection",
-                description: "Read selected Finder files and folders, validate that every path is inside the Desktop/Documents whitelist, and show them as context.",
-                requiredFields: [],
-                sideEffects: ["ask Finder for selection"],
-                dryRunBehavior: "Show selected Finder items without modifying them.",
-                examples: ["What is selected in Finder?", "Show my Finder selection"]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .finderAutomation),
-            CapabilityPermissionMetadata(requirement: .desktopDocumentsAccess)
-        ],
-        defaultRiskTier: .tier0
-    )
-
-    private static let revealInFinder = CapabilityMetadata(
-        id: "local.finder.reveal-path",
-        displayName: "Reveal in Finder",
-        description: "Reveal a whitelisted path in Finder.",
-        operations: [.revealInFinder],
-        plannerTools: [
-            AgentTool(
-                operation: .revealInFinder,
-                name: "Reveal path in Finder",
-                description: "Reveal a specific whitelisted path in Finder, or reveal the most recent file produced earlier in the same chain when outputPath is null.",
-                requiredFields: [],
-                sideEffects: ["open Finder"],
-                dryRunBehavior: "Show the path that would be revealed.",
-                examples: ["Reveal the zip in Finder", "Show the generated Markdown in Finder"]
-            )
-        ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .desktopDocumentsAccess),
-            CapabilityPermissionMetadata(requirement: .appOpening)
-        ],
-        defaultRiskTier: .tier1
-    )
-
-    private static let permissionReadiness = CapabilityMetadata(
-        id: "local.permissions.readiness",
-        displayName: "Permission readiness",
-        description: "Show current readiness status without prompting for permissions.",
-        operations: [.showPermissionReadiness],
-        plannerTools: [
-            AgentTool(
-                operation: .showPermissionReadiness,
-                name: "Show permission readiness",
-                description: "Show readiness for OpenAI key, microphone, hotkey, Finder/Word automation, Desktop/Documents access, Accessibility, and Screen Recording.",
-                requiredFields: [],
-                sideEffects: [],
-                dryRunBehavior: "Show permission readiness without requesting new permissions.",
-                examples: ["Check Sonny permissions", "Show readiness panel"]
-            )
-        ],
-        requiredPermissions: [],
-        defaultRiskTier: .tier0
-    )
 
     private static let saveRoutine = CapabilityMetadata(
         id: "local.routines.save",

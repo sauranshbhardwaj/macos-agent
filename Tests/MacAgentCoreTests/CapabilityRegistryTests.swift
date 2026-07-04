@@ -39,6 +39,12 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .openApp) is OpenAllowlistedAppCapabilityAdapter)
         #expect(try registry.adapter(for: .playMedia).metadata.id == "local.media.open-result")
         #expect(try registry.adapter(for: .playMedia) is OpenMediaResultCapabilityAdapter)
+        #expect(try registry.adapter(for: .getFinderSelection).metadata.id == "local.finder.read-selection")
+        #expect(try registry.adapter(for: .getFinderSelection) is FinderSelectionCapabilityAdapter)
+        #expect(try registry.adapter(for: .revealInFinder).metadata.id == "local.finder.reveal-path")
+        #expect(try registry.adapter(for: .revealInFinder) is RevealInFinderCapabilityAdapter)
+        #expect(try registry.adapter(for: .showPermissionReadiness).metadata.id == "local.permissions.readiness")
+        #expect(try registry.adapter(for: .showPermissionReadiness) is PermissionReadinessCapabilityAdapter)
         #expect(throws: CapabilityRegistryError.unsupportedOperation(.unsupported)) {
             _ = try registry.adapter(for: .unsupported)
         }

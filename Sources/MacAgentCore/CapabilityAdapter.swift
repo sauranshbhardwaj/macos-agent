@@ -121,6 +121,7 @@ public struct CapabilityExecutionContext {
     public var appOpener: any AppOpening
     public var mediaOpener: any MediaOpening
     public var finderContextReader: any FinderContextReading
+    public var permissionReadinessService: PermissionReadinessService
     public var fileManager: FileManager
     public var now: () -> Date
 
@@ -135,6 +136,7 @@ public struct CapabilityExecutionContext {
         appOpener: any AppOpening,
         mediaOpener: any MediaOpening,
         finderContextReader: any FinderContextReading,
+        permissionReadinessService: PermissionReadinessService,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
     ) {
@@ -148,6 +150,7 @@ public struct CapabilityExecutionContext {
         self.appOpener = appOpener
         self.mediaOpener = mediaOpener
         self.finderContextReader = finderContextReader
+        self.permissionReadinessService = permissionReadinessService
         self.fileManager = fileManager
         self.now = now
     }

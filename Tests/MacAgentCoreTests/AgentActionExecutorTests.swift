@@ -415,6 +415,22 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func revealPreviewAllowsFuturePathButExecuteRequiresExistingPath() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let futureOutput = root.appendingPathComponent("future.zip")
+        let executor = makeExecutor(root: root)
+
+        let preview = try executor.preview(plan: revealPlan(output: futureOutput))
+
+        #expect(preview.first?.title == "Reveal in Finder")
+        #expect(preview.first?.details == ["Reveal \(futureOutput.path)"])
+        await #expect(throws: PathValidationError.notFound(futureOutput.path)) {
+            try await executor.execute(plan: revealPlan(output: futureOutput)) { _, _ in }
+        }
+    }
+
+    @Test
     func finderSelectionCanSupplySelectedFolderContext() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -448,6 +464,22 @@ struct AgentActionExecutorTests {
         let preview = try executor.preview(plan: plan)
 
         #expect(preview.first?.title == "Zip 2 largest files")
+    }
+
+    @Test
+    func permissionReadinessPreviewAndExecutionAreReadOnlyStatusChecks() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let prepared = try executor.prepare(plan: permissionReadinessPlan())
+        let result = try await executor.execute(plan: permissionReadinessPlan()) { _, _ in }
+
+        #expect(prepared.previews.first?.title == "Permission readiness")
+        #expect(prepared.sideEffects.isEmpty)
+        #expect(result.previews.first?.title == "Permission readiness")
+        #expect(result.previews.first?.details.count == prepared.previews.first?.details.count)
+        #expect(result.summary.hasPrefix("Permission readiness checked."))
     }
 
     @Test
@@ -696,6 +728,35 @@ struct AgentActionExecutorTests {
                     mediaProvider: provider,
                     mediaTitle: title,
                     mediaArtist: "Drake"
+                )
+            ]
+        )
+    }
+
+    private func revealPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Reveal a file.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "reveal",
+                    operation: .revealInFinder,
+                    description: "Reveal generated output",
+                    outputPath: output.path
+                )
+            ]
+        )
+    }
+
+    private func permissionReadinessPlan() -> AgentPlan {
+        AgentPlan(
+            summary: "Show permission readiness.",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "permissions",
+                    operation: .showPermissionReadiness,
+                    description: "Show readiness"
                 )
             ]
         )

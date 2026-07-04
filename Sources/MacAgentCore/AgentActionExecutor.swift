@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 public enum AgentExecutionError: Error, LocalizedError, Equatable {
@@ -137,11 +136,11 @@ public final class AgentActionExecutor {
         case .mediaOpen:
             return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
-            return [try previewFinderSelection(plan)]
+            return try previewCapability(for: .getFinderSelection, plan: plan)
         case .revealInFinder:
-            return [try previewRevealInFinder(plan)]
+            return try previewCapability(for: .revealInFinder, plan: plan)
         case .permissionReadiness:
-            return [previewPermissionReadiness()]
+            return try previewCapability(for: .showPermissionReadiness, plan: plan)
         case .saveRoutine:
             return [try previewSaveRoutine(plan)]
         case .runRoutine:
@@ -179,14 +178,11 @@ public final class AgentActionExecutor {
         case .mediaOpen:
             return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
-            let summary = try executeFinderSelection(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .getFinderSelection, plan: resolvedPlan, log: log)
         case .revealInFinder:
-            let summary = try executeRevealInFinder(resolvedPlan, log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .revealInFinder, plan: resolvedPlan, log: log)
         case .permissionReadiness:
-            let summary = executePermissionReadiness(log: log)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
+            return try await executeCapability(for: .showPermissionReadiness, plan: resolvedPlan, log: log)
         case .saveRoutine:
             let summary = try executeSaveRoutine(resolvedPlan, log: log)
             return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary)
@@ -366,68 +362,10 @@ public final class AgentActionExecutor {
             appOpener: appOpener,
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
+            permissionReadinessService: permissionReadinessService,
             fileManager: fileManager,
             now: now
         )
-    }
-
-    private func previewFinderSelection(_ plan: AgentPlan) throws -> ActionPreview {
-        let selection = try whitelistedFinderSelection()
-        return ActionPreview(
-            title: "Finder selection",
-            details: selection.map(\.path)
-        )
-    }
-
-    private func executeFinderSelection(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) throws -> String {
-        log(.act, "Reading Finder selection")
-        let selection = try whitelistedFinderSelection()
-        log(.observe, "Found \(selection.count) selected item(s)")
-        return "Finder selection contains \(selection.count) whitelisted item(s)."
-    }
-
-    private func previewRevealInFinder(_ plan: AgentPlan) throws -> ActionPreview {
-        let url = try revealSpec(plan, requiresExistingPath: false)
-        return ActionPreview(
-            title: "Reveal in Finder",
-            details: ["Reveal \(url.path)"],
-            opens: ["Finder"]
-        )
-    }
-
-    private func executeRevealInFinder(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) throws -> String {
-        let url = try revealSpec(plan, requiresExistingPath: true)
-        log(.act, "Revealing \(url.path) in Finder")
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-        log(.summarize, "Revealed in Finder")
-        return "Revealed \(url.path) in Finder."
-    }
-
-    private func previewPermissionReadiness() -> ActionPreview {
-        let items = permissionItems()
-        return ActionPreview(
-            title: "Permission readiness",
-            details: items.map { "\($0.title): \($0.state.displayName) - \($0.detail)" }
-        )
-    }
-
-    private func executePermissionReadiness(log: @escaping (AgentPhase, String) -> Void) -> String {
-        let items = permissionItems()
-        let needsAction = items.filter { $0.state == .needsAction }
-        log(.observe, "Checked \(items.count) readiness item(s)")
-        if needsAction.isEmpty {
-            log(.summarize, "Permission readiness checked")
-            return "Permission readiness checked. No blocking required-action items were found."
-        }
-        let names = needsAction.map(\.title).joined(separator: ", ")
-        log(.summarize, "Needs action: \(names)")
-        return "Permission readiness checked. Needs action: \(names)."
     }
 
     private func previewSaveRoutine(_ plan: AgentPlan) throws -> ActionPreview {
@@ -634,30 +572,6 @@ public final class AgentActionExecutor {
         return resolved
     }
 
-    private func whitelistedFinderSelection() throws -> [URL] {
-        try FinderSelectionResolver.whitelistedSelection(
-            whitelist: whitelist,
-            finderContextReader: finderContextReader
-        )
-    }
-
-    private func revealSpec(_ plan: AgentPlan, requiresExistingPath: Bool) throws -> URL {
-        guard let step = plan.steps.first(where: { $0.operation == .revealInFinder }) else {
-            throw AgentExecutionError.invalidPlan("reveal_in_finder step is missing.")
-        }
-
-        if let rawPath = step.outputPath ?? step.inputPath,
-           !rawPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let url = try whitelist.validateInsideWhitelist(rawPath)
-            guard !requiresExistingPath || fileManager.fileExists(atPath: url.path) else {
-                throw PathValidationError.notFound(url.path)
-            }
-            return url
-        }
-
-        throw AgentExecutionError.invalidPlan("reveal_in_finder needs outputPath or a previous chained artifact.")
-    }
-
     private struct RoutineSaveSpec {
         var routine: StoredRoutine
     }
@@ -739,13 +653,6 @@ public final class AgentActionExecutor {
             _ = try SafeURL.validateWebURL(url)
         }
         return workspace
-    }
-
-    private func permissionItems() -> [PermissionReadinessItem] {
-        let hasAPIKey = !(ProcessInfo.processInfo.environment["OPENAI_API_KEY"] ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .isEmpty
-        return permissionReadinessService.currentStatus(hasAPIKey: hasAPIKey, hotKeyReady: true)
     }
 
 }
