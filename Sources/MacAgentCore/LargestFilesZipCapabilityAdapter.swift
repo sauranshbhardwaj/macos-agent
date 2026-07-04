@@ -104,11 +104,12 @@ public struct LargestFilesZipCapabilityAdapter: CapabilityAdapter {
     private func spec(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> LargestFileSpec {
         let scanStep = plan.steps.first { $0.operation == .scanSelectLargestFiles }
         let zipStep = plan.steps.first { $0.operation == .createZip }
-        guard let folderPath = try pathOrFinderSelectedDirectory(
+        guard let folderPath = try FinderSelectionResolver.selectedDirectoryPath(
             primary: scanStep?.inputPath,
             secondary: zipStep?.inputPath,
             contextSource: scanStep?.contextSource ?? zipStep?.contextSource,
-            context: context
+            whitelist: context.whitelist,
+            finderContextReader: context.finderContextReader
         ) else {
             throw AgentExecutionError.missingPath("largest file scan")
         }
@@ -123,40 +124,6 @@ public struct LargestFilesZipCapabilityAdapter: CapabilityAdapter {
         }
 
         return LargestFileSpec(folder: folder, count: count, outputURL: outputURL)
-    }
-
-    private func pathOrFinderSelectedDirectory(
-        primary: String?,
-        secondary: String?,
-        contextSource: FinderContextSource?,
-        context: CapabilityExecutionContext
-    ) throws -> String? {
-        if let path = primary ?? secondary,
-           !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return path
-        }
-
-        guard contextSource == .finderSelection else {
-            return nil
-        }
-
-        let selection = try whitelistedFinderSelection(context: context)
-        guard selection.count == 1 else {
-            throw FinderContextError.noDirectorySelection
-        }
-
-        let url = selection[0]
-        let values = try url.resourceValues(forKeys: [.isDirectoryKey])
-        guard values.isDirectory == true else {
-            throw FinderContextError.noDirectorySelection
-        }
-        return url.path
-    }
-
-    private func whitelistedFinderSelection(context: CapabilityExecutionContext) throws -> [URL] {
-        try context.finderContextReader.selectedItems().map { url in
-            try context.whitelist.validateInsideWhitelist(url.path)
-        }
     }
 
     private func suggestions(for spec: LargestFileSpec) -> [RunSuggestion] {

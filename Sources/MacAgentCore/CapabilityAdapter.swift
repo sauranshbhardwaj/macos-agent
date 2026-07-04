@@ -114,6 +114,7 @@ public struct CapabilityExecutionContext {
     public var whitelist: PathWhitelist
     public var inventory: FileInventory
     public var zipArchiver: any ZipArchiving
+    public var documentConverter: any DocumentConverting
     public var finderContextReader: any FinderContextReading
     public var fileManager: FileManager
     public var now: () -> Date
@@ -122,6 +123,7 @@ public struct CapabilityExecutionContext {
         whitelist: PathWhitelist,
         inventory: FileInventory,
         zipArchiver: any ZipArchiving,
+        documentConverter: any DocumentConverting,
         finderContextReader: any FinderContextReading,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -129,6 +131,7 @@ public struct CapabilityExecutionContext {
         self.whitelist = whitelist
         self.inventory = inventory
         self.zipArchiver = zipArchiver
+        self.documentConverter = documentConverter
         self.finderContextReader = finderContextReader
         self.fileManager = fileManager
         self.now = now

@@ -117,6 +117,40 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func docxPreviewCanUseSelectedFinderFolderContext() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("docx-b", to: root.appendingPathComponent("b.docx"))
+        let executor = makeExecutor(
+            root: root,
+            finderContextReader: FakeFinderContextReader(selection: [root])
+        )
+        let plan = AgentPlan(
+            summary: "Convert selected Finder folder.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan-docx",
+                    operation: .scanDocx,
+                    description: "Scan selected Finder folder.",
+                    contextSource: .finderSelection
+                ),
+                AgentStep(
+                    id: "convert-docx",
+                    operation: .convertDocxToPDF,
+                    description: "Convert selected Finder folder.",
+                    contextSource: .finderSelection
+                )
+            ]
+        )
+
+        let preview = try executor.preview(plan: plan)
+
+        #expect(preview.first?.title == "Convert 1 DOCX files")
+        #expect(preview.first?.writes.first?.hasSuffix("/\(root.lastPathComponent)/b.pdf") == true)
+    }
+
+    @Test
     func outputFileNormalizerMakesPDFUserReadable() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

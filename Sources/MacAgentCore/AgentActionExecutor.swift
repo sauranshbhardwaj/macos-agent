@@ -127,7 +127,7 @@ public final class AgentActionExecutor {
         case .largestFiles:
             return try previewCapability(for: .scanSelectLargestFiles, plan: plan)
         case .docx:
-            return [try previewDocxConversion(plan)]
+            return try previewCapability(for: .scanDocx, plan: plan)
         case .hackerNews:
             return [try previewHackerNews(plan)]
         case .openApp:
@@ -169,9 +169,7 @@ public final class AgentActionExecutor {
         case .largestFiles:
             return try await executeCapability(for: .scanSelectLargestFiles, plan: resolvedPlan, log: log)
         case .docx:
-            let summary = try await executeDocxConversion(resolvedPlan, log: log)
-            let suggestions = try docxSuggestions(resolvedPlan)
-            return AgentRunResult(plan: resolvedPlan, previews: try previews(), summary: summary, suggestions: suggestions)
+            return try await executeCapability(for: .scanDocx, plan: resolvedPlan, log: log)
         case .hackerNews:
             let summary = try await executeHackerNews(resolvedPlan, log: log)
             let suggestions = try hackerNewsSuggestions(resolvedPlan)
@@ -364,66 +362,11 @@ public final class AgentActionExecutor {
             whitelist: whitelist,
             inventory: inventory,
             zipArchiver: zipArchiver,
+            documentConverter: documentConverter,
             finderContextReader: finderContextReader,
             fileManager: fileManager,
             now: now
         )
-    }
-
-    private func previewDocxConversion(_ plan: AgentPlan) throws -> ActionPreview {
-        let spec = try docxSpec(plan)
-        let records = try inventory.docxFiles(
-            in: spec.folder,
-            outputFolder: spec.outputFolder,
-            mockDestinations: spec.usesMockDestinations
-        )
-        guard !records.isEmpty else {
-            throw AgentExecutionError.noMatchingFiles("No .docx files were found in \(spec.folder.path).")
-        }
-
-        let pending = records.filter { !$0.skippedBecausePDFExists }
-        let skipped = records.filter(\.skippedBecausePDFExists)
-
-        return ActionPreview(
-            title: "Convert \(pending.count) DOCX files",
-            details: [
-                "Converter: \(documentConverter.modeName)",
-                "Found \(records.count) .docx files",
-                "Skipping \(skipped.count) existing PDFs"
-            ],
-            writes: pending.map(\.destinationURL.path),
-            conversions: pending.map { "\($0.sourceURL.path) -> \($0.destinationURL.path)" }
-        )
-    }
-
-    private func executeDocxConversion(
-        _ plan: AgentPlan,
-        log: @escaping (AgentPhase, String) -> Void
-    ) async throws -> String {
-        let spec = try docxSpec(plan)
-        log(.act, "Scanning \(spec.folder.path) for .docx files")
-        let records = try inventory.docxFiles(
-            in: spec.folder,
-            outputFolder: spec.outputFolder,
-            mockDestinations: spec.usesMockDestinations
-        )
-        guard !records.isEmpty else {
-            throw AgentExecutionError.noMatchingFiles("No .docx files were found in \(spec.folder.path).")
-        }
-
-        let pending = records.filter { !$0.skippedBecausePDFExists }
-        let skipped = records.count - pending.count
-        log(.observe, "Found \(records.count) .docx files, skipping \(skipped) existing PDFs")
-        guard !pending.isEmpty else {
-            log(.summarize, "No DOCX files needed conversion")
-            return "No DOCX files needed conversion in \(spec.folder.path). Skipped \(skipped) existing PDF outputs."
-        }
-        log(.act, "Starting \(pending.count) conversion(s) with \(documentConverter.modeName)")
-        let converted = try await documentConverter.convert(records) { message in
-            log(.act, message)
-        }
-        log(.summarize, "Converted \(converted.count) files")
-        return "Converted \(converted.count) DOCX files from \(spec.folder.path). Skipped \(skipped) existing PDF outputs."
     }
 
     private func previewHackerNews(_ plan: AgentPlan) throws -> ActionPreview {
@@ -786,17 +729,6 @@ public final class AgentActionExecutor {
         return resolved
     }
 
-    private func docxSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
-        let spec = try docxSpec(plan)
-        return [
-            RunSuggestion(
-                title: "Reveal PDFs in Finder",
-                kind: .revealInFinder,
-                value: spec.outputFolder?.path ?? spec.folder.path
-            )
-        ]
-    }
-
     private func hackerNewsSuggestions(_ plan: AgentPlan) throws -> [RunSuggestion] {
         let spec = try hackerNewsSpec(plan)
         return [
@@ -811,34 +743,6 @@ public final class AgentActionExecutor {
                 value: spec.outputURL.path
             )
         ]
-    }
-
-    private struct DocxSpec {
-        var folder: URL
-        var outputFolder: URL?
-        var usesMockDestinations: Bool
-    }
-
-    private func docxSpec(_ plan: AgentPlan) throws -> DocxSpec {
-        let scanStep = plan.steps.first { $0.operation == .scanDocx }
-        let convertStep = plan.steps.first { $0.operation == .convertDocxToPDF }
-        guard let folderPath = try pathOrFinderSelectedDirectory(
-            primary: scanStep?.inputPath,
-            secondary: convertStep?.inputPath,
-            contextSource: scanStep?.contextSource ?? convertStep?.contextSource
-        ) else {
-            throw AgentExecutionError.missingPath("DOCX conversion")
-        }
-
-        let folder = try whitelist.validateExistingDirectory(folderPath)
-        var outputFolder: URL?
-        if let rawOutput = convertStep?.outputPath, !rawOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            outputFolder = try whitelist.validateExistingDirectory(rawOutput)
-        }
-
-        let usesMock = !MicrosoftWordDocumentConverter().isAvailable &&
-            ProcessInfo.processInfo.environment["MAC_AGENT_MOCK_DOCX"] == "1"
-        return DocxSpec(folder: folder, outputFolder: outputFolder, usesMockDestinations: usesMock)
     }
 
     private struct HackerNewsSpec {
@@ -909,36 +813,10 @@ public final class AgentActionExecutor {
     }
 
     private func whitelistedFinderSelection() throws -> [URL] {
-        try finderContextReader.selectedItems().map { url in
-            try whitelist.validateInsideWhitelist(url.path)
-        }
-    }
-
-    private func pathOrFinderSelectedDirectory(
-        primary: String?,
-        secondary: String?,
-        contextSource: FinderContextSource?
-    ) throws -> String? {
-        if let path = primary ?? secondary,
-           !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return path
-        }
-
-        guard contextSource == .finderSelection else {
-            return nil
-        }
-
-        let selection = try whitelistedFinderSelection()
-        guard selection.count == 1 else {
-            throw FinderContextError.noDirectorySelection
-        }
-
-        let url = selection[0]
-        let values = try url.resourceValues(forKeys: [.isDirectoryKey])
-        guard values.isDirectory == true else {
-            throw FinderContextError.noDirectorySelection
-        }
-        return url.path
+        try FinderSelectionResolver.whitelistedSelection(
+            whitelist: whitelist,
+            finderContextReader: finderContextReader
+        )
     }
 
     private func revealSpec(_ plan: AgentPlan, requiresExistingPath: Bool) throws -> URL {
