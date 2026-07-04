@@ -2968,14 +2968,17 @@ Required review checklist:
 
 Merge flow:
 
-- The implementer completes the branch's full scope, runs tests, updates the changelog, and writes a handoff prompt for the next chat.
+- Each feature branch is implemented in small, reviewable checkpoints on the same branch, not as one large unreviewed batch. A checkpoint should map to one migrated capability, subfeature, or similarly coherent leg of the branch.
+- After each checkpoint, the implementer reports the diff and relevant test results, then waits for the user to manually review/test and explicitly approve any commit or push for that checkpoint before continuing.
+- Checkpoint commits stay on the same feature branch until the branch's full roadmap scope is complete; do not create extra branches for every checkpoint unless the roadmap is explicitly updated.
+- After all checkpoints for the branch are complete, the implementer runs the full required test pass, updates the changelog, and writes a handoff prompt for the next chat.
 - The other agent reviews the branch against this spec, safety/risk/privacy rules, tests, and prototype-regression risk, and reports blocking issues, warnings, suggestions, or looks-good.
 - The implementer addresses findings on the same branch.
 - The user manually tests before approving the merge to `main`.
 
 Rollback principle:
 
-- Feature branches are useful rollback boundaries. Prefer small, reviewable branches over large mixed changes.
+- Feature branches are useful rollback boundaries, and checkpoint commits inside them are useful review/audit boundaries. Prefer small, reviewable checkpoint commits over large mixed changes.
 - Do not squash away important review context until the user has approved the final merge strategy.
 - Never commit, push, merge, or open/modify a PR without explicit user approval.
 

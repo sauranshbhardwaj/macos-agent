@@ -4,6 +4,22 @@ Canonical progress/handoff record for Sonny v1 implementation. This file is the 
 
 Branch naming: plain `feature/<name>` (no per-agent prefix). Agent identity is tracked per-entry below, not in the branch name.
 
+## Feature Branch Checkpoint Workflow
+
+Each roadmap row below is one feature branch, but a feature branch should be implemented as a sequence of small, reviewable checkpoints on that same branch. A checkpoint should map to one migrated capability, subfeature, or similarly coherent leg of the branch.
+
+Checkpoint workflow:
+
+1. Plan the full branch scope before editing.
+2. Implement one checkpoint on the feature branch.
+3. Run the relevant tests for that checkpoint.
+4. Report the diff and test results to the user.
+5. Wait for the user's manual review/testing and explicit approval before committing or pushing that checkpoint.
+6. Continue on the same feature branch for the next checkpoint.
+7. When all checkpoints for the branch are complete, run the full required test pass, fill this changelog entry, append the next-chat kickoff prompt, and send the branch for cross-agent review before merge to `main`.
+
+Do not batch an entire feature branch into one large unreviewed implementation. Do not create extra branches for every checkpoint unless this roadmap is explicitly updated. Never commit, push, merge, or open/modify a PR without explicit user approval.
+
 ## Locked Branch Roadmap (2026-07-04)
 
 Dependency-ordered. Do not start a branch before the ones above it are merged, unless a later chat explicitly re-justifies reordering here.
