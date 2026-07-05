@@ -117,6 +117,40 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func docxPreviewCanUseSelectedFinderFolderContext() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("docx-b", to: root.appendingPathComponent("b.docx"))
+        let executor = makeExecutor(
+            root: root,
+            finderContextReader: FakeFinderContextReader(selection: [root])
+        )
+        let plan = AgentPlan(
+            summary: "Convert selected Finder folder.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan-docx",
+                    operation: .scanDocx,
+                    description: "Scan selected Finder folder.",
+                    contextSource: .finderSelection
+                ),
+                AgentStep(
+                    id: "convert-docx",
+                    operation: .convertDocxToPDF,
+                    description: "Convert selected Finder folder.",
+                    contextSource: .finderSelection
+                )
+            ]
+        )
+
+        let preview = try executor.preview(plan: plan)
+
+        #expect(preview.first?.title == "Convert 1 DOCX files")
+        #expect(preview.first?.writes.first?.hasSuffix("/\(root.lastPathComponent)/b.pdf") == true)
+    }
+
+    @Test
     func outputFileNormalizerMakesPDFUserReadable() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -150,16 +184,23 @@ struct AgentActionExecutorTests {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
         let output = root.appendingPathComponent("hn.md")
+        let browserOpener = RecordingBrowserOpener()
         let executor = makeExecutor(
             root: root,
-            browserOpener: NoopBrowserOpener(),
+            browserOpener: browserOpener,
             hackerNewsFetcher: StaticHackerNewsFetcher()
         )
 
-        _ = try await executor.execute(plan: hnPlan(output: output)) { _, _ in }
+        let result = try await executor.execute(plan: hnPlan(output: output)) { _, _ in }
 
         let markdown = try String(contentsOf: output)
         #expect(markdown.contains("Fixture headline"))
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://news.ycombinator.com"])
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Reveal Markdown in Finder" &&
+                suggestion.kind == .revealInFinder &&
+                suggestion.value == output.path
+        })
     }
 
     @Test
@@ -210,6 +251,23 @@ struct AgentActionExecutorTests {
         #expect(throws: SafeURLError.unsupportedScheme("ftp")) {
             try executor.preview(plan: openURLPlan(url: "ftp://example.com"))
         }
+    }
+
+    @Test
+    func openAppAndURLExecutionUseInjectedOpeners() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let appOpener = RecordingAppOpener()
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(root: root, browserOpener: browserOpener, appOpener: appOpener)
+
+        let appResult = try await executor.execute(plan: openAppPlan(appName: "Safari")) { _, _ in }
+        let urlResult = try await executor.execute(plan: openURLPlan(url: "https://github.com")) { _, _ in }
+
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com"])
+        #expect(appResult.summary == "Opened Safari.")
+        #expect(urlResult.summary == "Opened https://github.com.")
     }
 
     @Test
@@ -357,6 +415,22 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func revealPreviewAllowsFuturePathButExecuteRequiresExistingPath() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let futureOutput = root.appendingPathComponent("future.zip")
+        let executor = makeExecutor(root: root)
+
+        let preview = try executor.preview(plan: revealPlan(output: futureOutput))
+
+        #expect(preview.first?.title == "Reveal in Finder")
+        #expect(preview.first?.details == ["Reveal \(futureOutput.path)"])
+        await #expect(throws: PathValidationError.notFound(futureOutput.path)) {
+            try await executor.execute(plan: revealPlan(output: futureOutput)) { _, _ in }
+        }
+    }
+
+    @Test
     func finderSelectionCanSupplySelectedFolderContext() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -390,6 +464,22 @@ struct AgentActionExecutorTests {
         let preview = try executor.preview(plan: plan)
 
         #expect(preview.first?.title == "Zip 2 largest files")
+    }
+
+    @Test
+    func permissionReadinessPreviewAndExecutionAreReadOnlyStatusChecks() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executor = makeExecutor(root: root)
+
+        let prepared = try executor.prepare(plan: permissionReadinessPlan())
+        let result = try await executor.execute(plan: permissionReadinessPlan()) { _, _ in }
+
+        #expect(prepared.previews.first?.title == "Permission readiness")
+        #expect(prepared.sideEffects.isEmpty)
+        #expect(result.previews.first?.title == "Permission readiness")
+        #expect(result.previews.first?.details.count == prepared.previews.first?.details.count)
+        #expect(result.summary.hasPrefix("Permission readiness checked."))
     }
 
     @Test
@@ -443,6 +533,66 @@ struct AgentActionExecutorTests {
 
         #expect(appOpener.openedBundleIDs == ["com.apple.Safari", "com.apple.Notes"])
         #expect(result.summary.contains("Ran routine Morning Setup."))
+    }
+
+    @Test
+    func routineRunUsesNestedDispatchForMixedChains() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        let appOpener = RecordingAppOpener()
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(
+            root: root,
+            browserOpener: browserOpener,
+            appOpener: appOpener,
+            routineStore: routineStore
+        )
+        let savePlan = AgentPlan(
+            summary: "Teach mixed routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "save-routine",
+                    operation: .saveRoutine,
+                    description: "Save routine.",
+                    routineName: "Mixed Launch",
+                    routineSteps: [
+                        AgentStep(
+                            id: "open-safari",
+                            operation: .openApp,
+                            description: "Open Safari.",
+                            appName: "Safari"
+                        ),
+                        AgentStep(
+                            id: "open-github",
+                            operation: .openURL,
+                            description: "Open GitHub.",
+                            targetURL: "https://github.com"
+                        )
+                    ]
+                )
+            ]
+        )
+        let runPlan = AgentPlan(
+            summary: "Run routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "run-routine",
+                    operation: .runRoutine,
+                    description: "Run routine.",
+                    routineName: "Mixed Launch"
+                )
+            ]
+        )
+
+        _ = try await executor.execute(plan: savePlan) { _, _ in }
+        let result = try await executor.execute(plan: runPlan) { _, _ in }
+
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com"])
+        #expect(result.summary == "Ran routine Mixed Launch. Opened Safari. Opened https://github.com.")
     }
 
     @Test
@@ -638,6 +788,35 @@ struct AgentActionExecutorTests {
                     mediaProvider: provider,
                     mediaTitle: title,
                     mediaArtist: "Drake"
+                )
+            ]
+        )
+    }
+
+    private func revealPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Reveal a file.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "reveal",
+                    operation: .revealInFinder,
+                    description: "Reveal generated output",
+                    outputPath: output.path
+                )
+            ]
+        )
+    }
+
+    private func permissionReadinessPlan() -> AgentPlan {
+        AgentPlan(
+            summary: "Show permission readiness.",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "permissions",
+                    operation: .showPermissionReadiness,
+                    description: "Show readiness"
                 )
             ]
         )
