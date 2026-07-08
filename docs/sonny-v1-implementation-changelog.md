@@ -29,7 +29,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 | 1 | `feature/capability-adapter-foundation` | §4A.0 | Complete (pending review) |
 | 2 | `feature/local-risk-approval-engine` | §10, §11, §11.1A | Complete (pending review) |
 | 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Complete (pending review) |
-| 4 | `feature/provider-media-playback` | §4A.4 | Not started |
+| 4 | `feature/provider-media-playback` | §4A.4 | Complete (pending review) |
 | 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Not started |
 | 6 | `feature/followup-usage-transparency` | §4A.8, §4A.9 | Not started |
 | 7 | `feature/local-storage-privacy-foundation` | §15.4 | Not started |
@@ -95,6 +95,7 @@ Must preserve: <the specific existing flows this branch must not break, pulled f
 Known pitfalls to avoid repeating: <from "Architectural decisions / pitfalls discovered" above, or "none">
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
 ```
 
 ## Entries
@@ -376,5 +377,73 @@ Primary target: §4A.4
 Just completed: feature/web-research-app-foundation — Sonny now has a generic web-to-Markdown capability with SwiftSoup-backed extraction, strict untrusted-content separation, Markdown save/open/reveal behavior, HN as a preset inside the generic adapter, a protocol-only search seam, and descriptor-backed app/website actions including app search URLs, generated-artifact opening, and local draft creation.
 Must preserve: web-to-Markdown direct URL tier 2 behavior with robots/login/CAPTCHA/paywall refusal, source links, timestamps, open/reveal suggestions, and tier 3 output-collision escalation; comparison-note support from multiple resolved sources; production topic/search must continue to fail clearly with `Web search provider not configured.` until a real provider is explicitly selected; Hacker News must keep the fixed HN URL, `HackerNewsFetching`, exact Markdown output structure, dry-run behavior, open/reveal suggestions, tier 2 gating, and exact tier 3 collision reason; `open_app_search_url` must remain fixed-template tier 1 URL opening only; `open_generated_artifact` must remain tier 1 whitelisted file opening with chained null-output resolution; `create_local_draft` must remain tier 2 local Markdown only with tier 3 overwrite escalation; app bundle allowlists and safe URL validation must not loosen; `AgentRunner` must continue to own approval gating and `AgentActionExecutor.execute()` must remain already-approved execution.
 Known pitfalls to avoid repeating: fetched or observed external content must not enter executable `AgentPlan` generation; use the separate strict-schema untrusted-content prompt path for summarization; new capability-specific escalation belongs in adapter `assessRisk(plan:context:)`; do not add a parallel confirmation path; use the shared previous-artifact chain resolver for generated artifact follow-ups; do not introduce app UI clicking/typing/scrolling for media playback because Power Mode is branch #14; production web search remains intentionally unavailable until a provider is chosen.
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
+### Branch: feature/provider-media-playback
+Status: complete
+Date: 2026-07-08
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §4A.4 complete for provider-aware media playback seams, fixed-order playback failure diagnosis, fixture-tested Spotify and Apple Music match/resolution, route-aware dry-run previews, preserved provider result/search fallback, and risk/runner integration. Production Spotify OAuth/Web API calls and Apple Music MusicKit calls remain intentionally deferred before the v1 major release announcement, per the branch decision.
+Files changed:
+- `Sources/MacAgentCore/AgentActionExecutor.swift`
+- `Sources/MacAgentCore/CapabilityAdapter.swift`
+- `Sources/MacAgentCore/MediaPlaybackService.swift`
+- `Sources/MacAgentCore/OpenAIPlanner.swift`
+- `Sources/MacAgentCore/OpenMediaResultCapabilityAdapter.swift`
+- `Tests/MacAgentCoreTests/AgentActionExecutorTests.swift`
+- `Tests/MacAgentCoreTests/AgentRunnerTests.swift`
+- `Tests/MacAgentCoreTests/MediaPlaybackServiceTests.swift`
+- `Tests/MacAgentCoreTests/PlannerBoundaryTests.swift`
+- `Tests/MacAgentCoreTests/ToolRegistryTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 122 tests in 12 suites.
+
+Behavior added:
+- Added the dedicated `MediaPlaybackFailureDiagnosis.diagnose(_:)` function over `MediaPlaybackBlockers`, returning exactly one `MediaPlaybackFailureReason` in the required precedence order: authorization, subscription/Premium, active device, catalog match, then provider outage.
+- Generalized the existing `MediaSearchMatcher` instead of adding a parallel scorer, keeping the title/artist normalization path used by iTunes fallback while adding optional album, duration, market/storefront scoring, and stable tie-breaking for provider resolvers.
+- Added the Spotify playback seam and resolver: `SpotifyPlaybackProviding`, `UnavailableSpotifyPlaybackProvider`, `SpotifyPlaybackResolver`, and typed Spotify status/device/candidate/result models. Fixture tests cover success, transfer playback, missing auth, missing Premium, missing active device, catalog mismatch, outage/rate-limit, and multi-blocker precedence.
+- Added the Apple Music playback seam and resolver: `AppleMusicPlaybackProviding`, `UnavailableAppleMusicPlaybackProvider`, `AppleMusicPlaybackResolver`, and typed Apple Music status/candidate/result models. Fixture tests cover authorized playback, missing authorization, missing subscription, catalog mismatch, provider outage, and multi-blocker precedence.
+- Wired provider playback into `OpenMediaResultCapabilityAdapter` and `AgentActionExecutor`: dry-run previews now explicitly show `search`, `play`, `transfer-playback`, or `fallback-open`; execution tries the provider seam first and, when blocked, reports the diagnosed blocker plus the result from `context.mediaOpener.open(request)`.
+
+Behavior preserved (required, no blanket claims):
+- Existing `play_media` planner-facing schema is unchanged: it still uses `mediaProvider`, `mediaTitle`, optional `mediaArtist`, and optional exact `targetURL`; the strict planner schema and golden metadata tests cover this boundary.
+- Existing provider/title validation and `MediaPlaybackRequest` construction are preserved for Apple Music and Spotify, including exact target URI handling when the user supplies one.
+- Existing result-opening/search-fallback behavior is unchanged for real users today because both production providers remain unconfigured by default. Apple Music still opens supplied Apple Music URLs, best matching iTunes/Apple Music catalog album results, or Apple Music search; Spotify still opens supplied Spotify URIs or Spotify search.
+- Existing iTunes-based Apple Music fallback lookup through `ITunesSearchAPIClient.bestTrack(...)` remains in place and continues to use the generalized `MediaSearchMatcher`; the provider resolver did not replace or bypass that fallback path.
+- Existing `MediaOpening` injection behavior is preserved: tests prove blocked provider playback still falls through to the injected `context.mediaOpener.open(request)` fallback, while provider-success execution does not call the opener.
+- `play_media` remains tier 1 auto-run with `dataLeavesDevice == true` and no new escalation; runner tests assert it still auto-runs through the existing `AgentRunner` risk contract.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- The branch reused and generalized `MediaSearchMatcher` instead of duplicating normalization/scoring logic. Spotify, Apple Music, and the iTunes fallback now share the same core title/artist matching behavior, with album/duration/market/storefront as optional scoring dimensions.
+- Provider `preview(_:)` is deliberately synchronous and non-throwing because `CapabilityAdapter.preview(...)` is synchronous and dry-run must never make live OAuth, MusicKit, or network calls. Previews can only report static/known route information from the injected seam; unavailable production providers therefore preview `fallback-open`.
+- `UnavailableSpotifyPlaybackProvider` and `UnavailableAppleMusicPlaybackProvider` intentionally map "not configured" to the authorization blocker, so the fixed diagnosis precedence does not need a separate seam-state exception.
+- The adapter reports one diagnosed blocker plus the fallback result when playback is blocked. It does not enumerate every possible failure, because §4A.4 requires exactly one surfaced reason in fixed precedence order.
+- Route-aware preview belongs at the adapter/provider seam boundary; real playback and transfer decisions remain provider concerns, while fallback opening remains the existing `MediaOpening` concern.
+
+Known limitations / deferred scope:
+- Spotify production playback is deferred before the v1 major release announcement, not permanently stubbed. The user has an existing Spotify Developer account, but real OAuth/PKCE credentials, scopes, token handling, device discovery, catalog search, and playback API calls still need to be wired before release.
+- Apple Music production playback is deferred before the v1 major release announcement, not permanently stubbed. Real MusicKit playback requires Apple Developer Program membership that the user does not currently have, plus the corresponding developer capabilities/credentials before release.
+- No live Spotify OAuth/Web API calls, Apple Music MusicKit calls, provider network traffic, Keychain token persistence, secure token storage, or provider app UI clicking/typing/scrolling were added on this branch.
+- Candidate resolution is real and fixture-tested, but production catalog candidates still need to come from future real provider implementations.
+Open questions for the next chat (required, write "none" if true): none.
+
+Next branch: `feature/instant-utilities-shortcuts` (§4A.6, §4A.7), adding instant utility actions and a scoped Shortcuts bridge on top of the adapter/risk foundations.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/instant-utilities-shortcuts
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §4A.6, §4A.7
+
+Just completed: feature/provider-media-playback — Sonny now has provider-aware Spotify and Apple Music playback seams, fixture-tested match resolution, fixed single-blocker diagnosis precedence, route-aware dry-run previews, and universal fallback to existing result opening while production providers remain intentionally unavailable.
+Must preserve: fixed playback failure precedence through `MediaPlaybackFailureDiagnosis.diagnose(_:)`; generalized `MediaSearchMatcher` reuse; Spotify and Apple Music unavailable defaults with fallback-open behavior; existing Apple Music iTunes result/search fallback and Spotify URI/search fallback; `play_media` tier 1 auto-run/no escalation behavior; unchanged `play_media` planner-facing schema; no live OAuth/MusicKit/provider network calls until credentials and developer access are explicitly wired.
+Known pitfalls to avoid repeating: provider `preview(_:)` is synchronous/non-throwing by design and must never make live calls; do not duplicate media scoring logic instead of reusing `MediaSearchMatcher`; do not introduce UI clicking/typing/scrolling app control for provider media; new capability-specific risk behavior must go through adapter `assessRisk(plan:context:)` and `AgentRunner`; production Spotify and Apple Music wiring remain deferred-before-v1 known limitations, not permanent stubs.
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.

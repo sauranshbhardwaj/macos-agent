@@ -34,7 +34,7 @@ struct PlannerBoundaryTests {
         - For opening a general website, produce one open_url step with targetURL using http or https.
         - For creating a local draft, produce one create_local_draft step with draftTitle, draftContent, and optional outputPath. Do not automate Notes, Mail, Calendar, or any app UI.
         - For opening a generated local artifact after a writing step, add open_generated_artifact with outputPath null so the executor can open the previous produced artifact.
-        - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
+        - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor tries provider-aware playback first, then falls back to opening the provider result or search.
         - If a song or album request is missing the provider or title, ask a clarification question.
         - For Finder context phrases such as "selected folder", "selected files", "this Finder selection", or "the folder selected in Finder", set contextSource to finder_selection and leave inputPath null.
         - For "reveal the result/zip/markdown/PDFs in Finder" after a writing step, add reveal_in_finder with outputPath null so the executor can reveal the previous produced artifact.
@@ -189,12 +189,12 @@ private let expectedDefaultPlannerDescription = """
   side effects: write file
   dry run: Show the draft file path without writing it.
   examples: Create a local draft called Follow-up with this text
-- play_media: Open music result
-  description: Open a requested song or album in Apple Music or Spotify without starting playback. Apple Music opens the best matching catalog album result when found, otherwise search. Spotify opens a supplied Spotify result URI or a Spotify search.
+- play_media: Play or open music
+  description: Try to play a requested song or album in Apple Music or Spotify through the provider playback seam. If playback is unavailable, open the exact provider result URI when supplied, or open the provider search/result fallback.
   required fields: mediaProvider, mediaTitle
-  side effects: open music app
-  dry run: Show the provider, title, artist, and result/search behavior without opening an app.
-  examples: Open Jimmy Cooks by Drake on Apple Music | Open Bad Habit by Steve Lacy on Spotify
+  side effects: play or open music app
+  dry run: Show whether Sonny would search, play, transfer playback, or fall back to opening without starting playback or opening an app.
+  examples: Play Jimmy Cooks by Drake on Apple Music | Play Bad Habit by Steve Lacy on Spotify
 - get_finder_selection: Read Finder selection
   description: Read selected Finder files and folders, validate that every path is inside the Desktop/Documents whitelist, and show them as context.
   required fields: none

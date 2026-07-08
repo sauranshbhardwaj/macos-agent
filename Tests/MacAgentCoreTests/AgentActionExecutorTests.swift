@@ -464,10 +464,80 @@ struct AgentActionExecutorTests {
         let spotify = try executor.preview(plan: mediaPlan(provider: .spotify))
 
         #expect(appleMusic.first?.opens == ["Apple Music"])
-        #expect(appleMusic.first?.title == "Open Jimmy Cooks by Drake")
-        #expect(appleMusic.first?.details.contains("Opens the best matching Apple Music album result, or Apple Music search if no match is found.") == true)
+        #expect(appleMusic.first?.title == "Play Jimmy Cooks by Drake")
+        #expect(appleMusic.first?.details.contains("Playback route: fallback-open") == true)
+        #expect(appleMusic.first?.details.contains("Apple Music playback provider not configured.") == true)
+        #expect(appleMusic.first?.details.contains("Fallback: open the best matching Apple Music catalog result, or Apple Music search if no match is found.") == true)
         #expect(spotify.first?.opens == ["Spotify"])
-        #expect(spotify.first?.details.contains("Opens Spotify search for the requested song or album.") == true)
+        #expect(spotify.first?.details.contains("Playback route: fallback-open") == true)
+        #expect(spotify.first?.details.contains("Spotify playback provider not configured.") == true)
+        #expect(spotify.first?.details.contains("Fallback: open Spotify search for the requested song or album.") == true)
+    }
+
+    @Test
+    func mediaOpenPreviewDistinguishesSearchPlayTransferAndFallbackRoutes() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let searchExecutor = makeExecutor(
+            root: root,
+            spotifyPlaybackProvider: StaticSpotifyPlaybackProvider(
+                previewResult: MediaPlaybackRoutePreview(
+                    route: .search,
+                    detail: "Would search Spotify catalog for Jimmy Cooks by Drake."
+                ),
+                playResult: .blocked(
+                    SpotifyPlaybackFailure(
+                        blockers: MediaPlaybackBlockers(catalogMatchBlocked: true),
+                        detail: "No Spotify catalog match."
+                    )
+                )
+            )
+        )
+        let playExecutor = makeExecutor(
+            root: root,
+            appleMusicPlaybackProvider: StaticAppleMusicPlaybackProvider(
+                previewResult: MediaPlaybackRoutePreview(
+                    route: .play,
+                    detail: "Apple Music can queue and play Good Days."
+                ),
+                playResult: .started(
+                    AppleMusicPlaybackStart(
+                        action: .queueAndPlay(catalogID: "good-days"),
+                        track: AppleMusicTrackCandidate(catalogID: "good-days", title: "Good Days", artist: "SZA")
+                    )
+                )
+            )
+        )
+        let transferExecutor = makeExecutor(
+            root: root,
+            spotifyPlaybackProvider: StaticSpotifyPlaybackProvider(
+                previewResult: MediaPlaybackRoutePreview(
+                    route: .transferPlayback,
+                    detail: "Would transfer playback to Sonny Mac, then play Jimmy Cooks."
+                ),
+                playResult: .started(
+                    SpotifyPlaybackStart(
+                        action: .transferAndPlay(uri: "spotify:track:best", deviceID: "mac"),
+                        track: SpotifyTrackCandidate(uri: "spotify:track:best", title: "Jimmy Cooks", artists: ["Drake"]),
+                        device: SpotifyPlaybackDevice(id: "mac", name: "Sonny Mac", isActive: false)
+                    )
+                )
+            )
+        )
+        let fallbackExecutor = makeExecutor(root: root)
+
+        let searchPreview = try searchExecutor.preview(plan: mediaPlan(provider: .spotify)).first
+        let playPreview = try playExecutor.preview(plan: mediaPlan(provider: .appleMusic, title: "Good Days", artist: "SZA")).first
+        let transferPreview = try transferExecutor.preview(plan: mediaPlan(provider: .spotify)).first
+        let fallbackPreview = try fallbackExecutor.preview(plan: mediaPlan(provider: .spotify)).first
+
+        #expect(searchPreview?.details.contains("Playback route: search") == true)
+        #expect(searchPreview?.details.contains("Would search Spotify catalog for Jimmy Cooks by Drake.") == true)
+        #expect(playPreview?.details.contains("Playback route: play") == true)
+        #expect(playPreview?.details.contains("Apple Music can queue and play Good Days.") == true)
+        #expect(transferPreview?.details.contains("Playback route: transfer-playback") == true)
+        #expect(transferPreview?.details.contains("Would transfer playback to Sonny Mac, then play Jimmy Cooks.") == true)
+        #expect(fallbackPreview?.details.contains("Playback route: fallback-open") == true)
     }
 
     @Test
@@ -479,9 +549,89 @@ struct AgentActionExecutorTests {
 
         let result = try await executor.execute(plan: mediaPlan(provider: .appleMusic)) { _, _ in }
 
-        #expect(result.summary == "Opened Jimmy Cooks by Drake in Apple Music.")
+        #expect(result.summary == "Apple Music playback unavailable (authorization): Apple Music playback provider not configured. Fallback result: Opened Jimmy Cooks by Drake in Apple Music.")
         #expect(opener.requests == [
             MediaPlaybackRequest(provider: .appleMusic, title: "Jimmy Cooks", artist: "Drake")
+        ])
+    }
+
+    @Test
+    func mediaOpenExecutionFallsBackToInjectedOpenerWhenSpotifyPlaybackIsBlocked() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let opener = FakeMediaOpener()
+        let spotifyProvider = StaticSpotifyPlaybackProvider(
+            previewResult: MediaPlaybackRoutePreview(
+                route: .fallbackOpen,
+                detail: "Spotify Premium required.",
+                failureReason: .subscriptionPremium
+            ),
+            playResult: .blocked(
+                SpotifyPlaybackFailure(
+                    blockers: MediaPlaybackBlockers(subscriptionBlocked: true),
+                    detail: "Spotify Premium required."
+                )
+            )
+        )
+        let executor = makeExecutor(
+            root: root,
+            mediaOpener: opener,
+            spotifyPlaybackProvider: spotifyProvider
+        )
+
+        let result = try await executor.execute(plan: mediaPlan(provider: .spotify)) { _, _ in }
+
+        #expect(result.summary == "Spotify playback unavailable (subscription/Premium): Spotify Premium required. Fallback result: Opened Jimmy Cooks by Drake in Spotify.")
+        #expect(opener.requests == [
+            MediaPlaybackRequest(provider: .spotify, title: "Jimmy Cooks", artist: "Drake")
+        ])
+        #expect(spotifyProvider.playRequests == [
+            MediaPlaybackRequest(provider: .spotify, title: "Jimmy Cooks", artist: "Drake")
+        ])
+    }
+
+    @Test
+    func mediaOpenExecutionUsesProviderPlaybackWhenAvailable() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let opener = FakeMediaOpener()
+        let spotifyProvider = StaticSpotifyPlaybackProvider(
+            previewResult: MediaPlaybackRoutePreview(route: .play, detail: "Spotify can play Jimmy Cooks."),
+            playResult: .started(
+                SpotifyPlaybackStart(
+                    action: .play(uri: "spotify:track:best", deviceID: "mac"),
+                    track: SpotifyTrackCandidate(uri: "spotify:track:best", title: "Jimmy Cooks", artists: ["Drake"]),
+                    device: SpotifyPlaybackDevice(id: "mac", name: "Sonny Mac", isActive: true)
+                )
+            )
+        )
+        let appleProvider = StaticAppleMusicPlaybackProvider(
+            previewResult: MediaPlaybackRoutePreview(route: .play, detail: "Apple Music can play Good Days."),
+            playResult: .started(
+                AppleMusicPlaybackStart(
+                    action: .queueAndPlay(catalogID: "good-days"),
+                    track: AppleMusicTrackCandidate(catalogID: "good-days", title: "Good Days", artist: "SZA")
+                )
+            )
+        )
+        let executor = makeExecutor(
+            root: root,
+            mediaOpener: opener,
+            spotifyPlaybackProvider: spotifyProvider,
+            appleMusicPlaybackProvider: appleProvider
+        )
+
+        let spotify = try await executor.execute(plan: mediaPlan(provider: .spotify)) { _, _ in }
+        let appleMusic = try await executor.execute(plan: mediaPlan(provider: .appleMusic, title: "Good Days", artist: "SZA")) { _, _ in }
+
+        #expect(spotify.summary == "Started Spotify playback for Jimmy Cooks by Drake.")
+        #expect(appleMusic.summary == "Started Apple Music playback for Good Days by SZA.")
+        #expect(opener.requests.isEmpty)
+        #expect(spotifyProvider.playRequests == [
+            MediaPlaybackRequest(provider: .spotify, title: "Jimmy Cooks", artist: "Drake")
+        ])
+        #expect(appleProvider.playRequests == [
+            MediaPlaybackRequest(provider: .appleMusic, title: "Good Days", artist: "SZA")
         ])
     }
 
@@ -910,6 +1060,8 @@ struct AgentActionExecutorTests {
         appOpener: AppOpening = NoopAppOpener(),
         fileOpener: FileOpening = NoopFileOpener(),
         mediaOpener: MediaOpening = FakeMediaOpener(),
+        spotifyPlaybackProvider: (any SpotifyPlaybackProviding)? = nil,
+        appleMusicPlaybackProvider: (any AppleMusicPlaybackProviding)? = nil,
         finderContextReader: FinderContextReading = FakeFinderContextReader(selection: []),
         routineStore: RoutineStore? = nil,
         workspaceStore: WorkspaceStore? = nil,
@@ -928,6 +1080,8 @@ struct AgentActionExecutorTests {
             appOpener: appOpener,
             fileOpener: fileOpener,
             mediaOpener: mediaOpener,
+            spotifyPlaybackProvider: spotifyPlaybackProvider,
+            appleMusicPlaybackProvider: appleMusicPlaybackProvider,
             finderContextReader: finderContextReader,
             routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
             workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json")),
@@ -1140,7 +1294,11 @@ struct AgentActionExecutorTests {
         )
     }
 
-    private func mediaPlan(provider: MediaProvider?, title: String = "Jimmy Cooks") -> AgentPlan {
+    private func mediaPlan(
+        provider: MediaProvider?,
+        title: String = "Jimmy Cooks",
+        artist: String = "Drake"
+    ) -> AgentPlan {
         AgentPlan(
             summary: "Open a song result.",
             requiresConfirmation: true,
@@ -1152,7 +1310,7 @@ struct AgentActionExecutorTests {
                     targetURL: nil,
                     mediaProvider: provider,
                     mediaTitle: title,
-                    mediaArtist: "Drake"
+                    mediaArtist: artist
                 )
             ]
         )
@@ -1274,6 +1432,48 @@ private final class FakeMediaOpener: MediaOpening {
     func open(_ request: MediaPlaybackRequest) async throws -> String {
         requests.append(request)
         return "Opened \(request.displayTitle) in \(request.provider.displayName)."
+    }
+}
+
+@MainActor
+private final class StaticSpotifyPlaybackProvider: SpotifyPlaybackProviding {
+    var previewResult: MediaPlaybackRoutePreview
+    var playResult: SpotifyPlaybackResult
+    private(set) var playRequests: [MediaPlaybackRequest] = []
+
+    init(previewResult: MediaPlaybackRoutePreview, playResult: SpotifyPlaybackResult) {
+        self.previewResult = previewResult
+        self.playResult = playResult
+    }
+
+    func preview(_ request: MediaPlaybackRequest) -> MediaPlaybackRoutePreview {
+        previewResult
+    }
+
+    func play(_ request: MediaPlaybackRequest) async -> SpotifyPlaybackResult {
+        playRequests.append(request)
+        return playResult
+    }
+}
+
+@MainActor
+private final class StaticAppleMusicPlaybackProvider: AppleMusicPlaybackProviding {
+    var previewResult: MediaPlaybackRoutePreview
+    var playResult: AppleMusicPlaybackResult
+    private(set) var playRequests: [MediaPlaybackRequest] = []
+
+    init(previewResult: MediaPlaybackRoutePreview, playResult: AppleMusicPlaybackResult) {
+        self.previewResult = previewResult
+        self.playResult = playResult
+    }
+
+    func preview(_ request: MediaPlaybackRequest) -> MediaPlaybackRoutePreview {
+        previewResult
+    }
+
+    func play(_ request: MediaPlaybackRequest) async -> AppleMusicPlaybackResult {
+        playRequests.append(request)
+        return playResult
     }
 }
 
