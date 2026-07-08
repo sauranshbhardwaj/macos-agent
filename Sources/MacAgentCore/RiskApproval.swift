@@ -29,6 +29,30 @@ public enum RiskApprovalRequirement: String, Codable, CaseIterable, Equatable, S
     case lightweightConfirmation = "lightweight_confirmation"
     case explicitApproval = "explicit_approval"
     case refuse = "refuse"
+
+    public var displayName: String {
+        switch self {
+        case .autoRun:
+            return "Auto-run"
+        case .previewOnly:
+            return "Preview only"
+        case .lightweightConfirmation:
+            return "Lightweight confirmation"
+        case .explicitApproval:
+            return "Explicit approval"
+        case .refuse:
+            return "Refuse"
+        }
+    }
+
+    public var requiresUserApproval: Bool {
+        switch self {
+        case .lightweightConfirmation, .explicitApproval:
+            return true
+        case .autoRun, .previewOnly, .refuse:
+            return false
+        }
+    }
 }
 
 public enum Tier2ApprovalMode: String, Codable, CaseIterable, Equatable, Sendable {
@@ -100,6 +124,54 @@ public struct RiskApprovalCopy: Codable, Equatable, Sendable {
             "Data leaves device: \(dataLeavesDevice ? "yes" : "no")",
             "Undo: \(undoDescription)"
         ]
+    }
+}
+
+public struct RiskApprovalRequest: Codable, Equatable, Sendable {
+    public var assessment: CapabilityRiskAssessment
+    public var requirement: RiskApprovalRequirement
+    public var approvalCopy: RiskApprovalCopy
+
+    public init(
+        assessment: CapabilityRiskAssessment,
+        requirement: RiskApprovalRequirement,
+        approvalCopy: RiskApprovalCopy? = nil
+    ) {
+        self.assessment = assessment
+        self.requirement = requirement
+        self.approvalCopy = approvalCopy ?? assessment.approvalCopy ?? RiskApprovalCopy(
+            actionDescription: "Run the prepared plan",
+            riskReason: assessment.effectiveTier.semanticName,
+            involvedResource: "Prepared Sonny action",
+            dataLeavesDevice: false,
+            undoDescription: "No automatic undo is available."
+        )
+    }
+
+    public var requiresUserApproval: Bool {
+        requirement.requiresUserApproval
+    }
+}
+
+public enum RiskApprovalDecision: String, Codable, Equatable, Sendable {
+    case notRequested = "not_requested"
+    case approved = "approved"
+}
+
+public enum RiskApprovalError: Error, Equatable, LocalizedError {
+    case approvalRequired(RiskApprovalRequest)
+    case previewOnly(RiskApprovalRequest)
+    case refused(RiskApprovalRequest)
+
+    public var errorDescription: String? {
+        switch self {
+        case .approvalRequired(let request):
+            return "Approval required before Sonny can run this \(request.assessment.effectiveTier.displayName.lowercased()) action."
+        case .previewOnly:
+            return "This action is limited to preview by the current approval policy."
+        case .refused(let request):
+            return "Sonny refused this \(request.assessment.effectiveTier.displayName.lowercased()) action."
+        }
     }
 }
 
