@@ -127,6 +127,7 @@ public struct CapabilityExecutionContext {
     public var fileOpener: any FileOpening
     public var mediaOpener: any MediaOpening
     public var spotifyPlaybackProvider: any SpotifyPlaybackProviding
+    public var appleMusicPlaybackProvider: any AppleMusicPlaybackProviding
     public var finderContextReader: any FinderContextReading
     public var permissionReadinessService: PermissionReadinessService
     public var routineStore: RoutineStore
@@ -153,6 +154,7 @@ public struct CapabilityExecutionContext {
         fileOpener: any FileOpening,
         mediaOpener: any MediaOpening,
         spotifyPlaybackProvider: any SpotifyPlaybackProviding,
+        appleMusicPlaybackProvider: any AppleMusicPlaybackProviding,
         finderContextReader: any FinderContextReading,
         permissionReadinessService: PermissionReadinessService,
         routineStore: RoutineStore,
@@ -178,6 +180,7 @@ public struct CapabilityExecutionContext {
         self.fileOpener = fileOpener
         self.mediaOpener = mediaOpener
         self.spotifyPlaybackProvider = spotifyPlaybackProvider
+        self.appleMusicPlaybackProvider = appleMusicPlaybackProvider
         self.finderContextReader = finderContextReader
         self.permissionReadinessService = permissionReadinessService
         self.routineStore = routineStore

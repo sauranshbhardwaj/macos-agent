@@ -56,6 +56,7 @@ public final class AgentActionExecutor {
     private let fileOpener: FileOpening
     private let mediaOpener: MediaOpening
     private let spotifyPlaybackProvider: any SpotifyPlaybackProviding
+    private let appleMusicPlaybackProvider: any AppleMusicPlaybackProviding
     private let finderContextReader: FinderContextReading
     private let permissionReadinessService: PermissionReadinessService
     private let routineStore: RoutineStore
@@ -80,6 +81,7 @@ public final class AgentActionExecutor {
         fileOpener: FileOpening = WorkspaceFileOpener(),
         mediaOpener: MediaOpening = NativeMediaOpener(),
         spotifyPlaybackProvider: (any SpotifyPlaybackProviding)? = nil,
+        appleMusicPlaybackProvider: (any AppleMusicPlaybackProviding)? = nil,
         finderContextReader: FinderContextReading = AppleScriptFinderContextReader(),
         permissionReadinessService: PermissionReadinessService = PermissionReadinessService(),
         routineStore: RoutineStore = RoutineStore(),
@@ -103,6 +105,7 @@ public final class AgentActionExecutor {
         self.fileOpener = fileOpener
         self.mediaOpener = mediaOpener
         self.spotifyPlaybackProvider = spotifyPlaybackProvider ?? UnavailableSpotifyPlaybackProvider()
+        self.appleMusicPlaybackProvider = appleMusicPlaybackProvider ?? UnavailableAppleMusicPlaybackProvider()
         self.finderContextReader = finderContextReader
         self.permissionReadinessService = permissionReadinessService
         self.routineStore = routineStore
@@ -581,6 +584,7 @@ public final class AgentActionExecutor {
             fileOpener: fileOpener,
             mediaOpener: mediaOpener,
             spotifyPlaybackProvider: spotifyPlaybackProvider,
+            appleMusicPlaybackProvider: appleMusicPlaybackProvider,
             finderContextReader: finderContextReader,
             permissionReadinessService: permissionReadinessService,
             routineStore: routineStore,

@@ -236,6 +236,147 @@ struct MediaPlaybackServiceTests {
     }
 
     @Test
+    func appleMusicResolverQueuesBestMatchingTrackForPlayback() {
+        let request = appleMusicRequest()
+        let result = AppleMusicPlaybackResolver.resolve(
+            request: request,
+            state: appleMusicState(
+                candidates: [
+                    appleMusicTrack(
+                        catalogID: "wrong-storefront",
+                        title: "Good Days",
+                        artist: "SZA",
+                        albumTitle: "Good Days - Single",
+                        durationMilliseconds: 279_204,
+                        storefronts: ["gb"]
+                    ),
+                    appleMusicTrack(
+                        catalogID: "wrong-album-duration",
+                        title: "Good Days",
+                        artist: "SZA",
+                        albumTitle: "Ctrl",
+                        durationMilliseconds: 240_000,
+                        storefronts: ["us"]
+                    ),
+                    appleMusicTrack(
+                        catalogID: "best",
+                        title: "Good Days",
+                        artist: "SZA",
+                        albumTitle: "Good Days - Single",
+                        durationMilliseconds: 279_204,
+                        storefronts: ["us"]
+                    )
+                ]
+            )
+        )
+
+        guard case .started(let start) = result else {
+            Issue.record("Expected Apple Music playback to start.")
+            return
+        }
+
+        #expect(start.track.catalogID == "best")
+        #expect(start.action == .queueAndPlay(catalogID: "best"))
+    }
+
+    @Test
+    func unavailableAppleMusicProviderFailsAsAuthorizationBlocker() async {
+        let result = await UnavailableAppleMusicPlaybackProvider().play(appleMusicRequest())
+
+        guard case .blocked(let failure) = result else {
+            Issue.record("Expected unavailable Apple Music provider to block playback.")
+            return
+        }
+
+        #expect(failure.reason == .authorization)
+        #expect(failure.detail == "Apple Music playback provider not configured.")
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(failure.blockers) == failure.reason)
+    }
+
+    @Test
+    func appleMusicResolverDiagnosesMissingAuthorization() {
+        let result = AppleMusicPlaybackResolver.resolve(
+            request: appleMusicRequest(),
+            state: appleMusicState(isAuthorized: false, candidates: [appleMusicTrack()])
+        )
+
+        assertAppleMusicBlocked(result, reason: .authorization)
+    }
+
+    @Test
+    func appleMusicResolverDiagnosesMissingSubscription() {
+        let result = AppleMusicPlaybackResolver.resolve(
+            request: appleMusicRequest(),
+            state: appleMusicState(hasSubscription: false, candidates: [appleMusicTrack()])
+        )
+
+        assertAppleMusicBlocked(result, reason: .subscriptionPremium)
+    }
+
+    @Test
+    func appleMusicResolverDiagnosesCatalogMismatch() {
+        let result = AppleMusicPlaybackResolver.resolve(
+            request: appleMusicRequest(),
+            state: appleMusicState(
+                candidates: [
+                    appleMusicTrack(
+                        catalogID: "wrong",
+                        title: "Wrong Song",
+                        artist: "SZA",
+                        albumTitle: "Good Days - Single",
+                        durationMilliseconds: 279_204,
+                        storefronts: ["us"]
+                    )
+                ]
+            )
+        )
+
+        assertAppleMusicBlocked(result, reason: .catalogMatch)
+    }
+
+    @Test
+    func appleMusicResolverDiagnosesProviderOutage() {
+        let result = AppleMusicPlaybackResolver.resolve(
+            request: appleMusicRequest(),
+            state: appleMusicState(providerStatus: .outage, candidates: [appleMusicTrack()])
+        )
+
+        assertAppleMusicBlocked(
+            result,
+            reason: .providerOutage,
+            detail: "Apple Music playback is currently unavailable."
+        )
+    }
+
+    @Test
+    func appleMusicResolverUsesFailureDiagnosisForMultiBlockerPrecedence() {
+        let result = AppleMusicPlaybackResolver.resolve(
+            request: appleMusicRequest(),
+            state: appleMusicState(
+                isAuthorized: false,
+                hasSubscription: false,
+                providerStatus: .outage,
+                candidates: []
+            )
+        )
+
+        guard case .blocked(let failure) = result else {
+            Issue.record("Expected Apple Music playback to be blocked.")
+            return
+        }
+
+        #expect(failure.blockers == MediaPlaybackBlockers(
+            authorizationBlocked: true,
+            subscriptionBlocked: true,
+            activeDeviceBlocked: false,
+            catalogMatchBlocked: true,
+            providerOutageBlocked: true
+        ))
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(failure.blockers) == .authorization)
+        #expect(failure.reason == .authorization)
+    }
+
+    @Test
     func iTunesSearchReturnsAppleMusicAlbumLink() async throws {
         AppleMusicFixtureURLProtocol.handler = { request in
             #expect(request.url?.path == "/search")
@@ -426,6 +567,65 @@ struct MediaPlaybackServiceTests {
     ) {
         guard case .blocked(let failure) = result else {
             Issue.record("Expected Spotify playback to be blocked.")
+            return
+        }
+
+        #expect(failure.reason == reason)
+        #expect(failure.detail == detail)
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(failure.blockers) == failure.reason)
+    }
+
+    private func appleMusicRequest() -> MediaPlaybackRequest {
+        MediaPlaybackRequest(
+            provider: .appleMusic,
+            title: "Good Days",
+            artist: "SZA",
+            albumTitle: "Good Days - Single",
+            durationMilliseconds: 279_204,
+            market: "us"
+        )
+    }
+
+    private func appleMusicState(
+        isAuthorized: Bool = true,
+        hasSubscription: Bool = true,
+        providerStatus: AppleMusicProviderStatus = .available,
+        candidates: [AppleMusicTrackCandidate]
+    ) -> AppleMusicPlaybackState {
+        AppleMusicPlaybackState(
+            isAuthorized: isAuthorized,
+            hasSubscription: hasSubscription,
+            candidates: candidates,
+            providerStatus: providerStatus
+        )
+    }
+
+    private func appleMusicTrack(
+        catalogID: String = "best",
+        title: String = "Good Days",
+        artist: String = "SZA",
+        albumTitle: String = "Good Days - Single",
+        durationMilliseconds: Int = 279_204,
+        storefronts: [String] = ["us"]
+    ) -> AppleMusicTrackCandidate {
+        AppleMusicTrackCandidate(
+            catalogID: catalogID,
+            title: title,
+            artist: artist,
+            albumTitle: albumTitle,
+            durationMilliseconds: durationMilliseconds,
+            storefronts: storefronts,
+            url: URL(string: "https://music.apple.com/us/song/good-days/\(catalogID)")
+        )
+    }
+
+    private func assertAppleMusicBlocked(
+        _ result: AppleMusicPlaybackResult,
+        reason: MediaPlaybackFailureReason,
+        detail: String = "Apple Music playback requirements were not met."
+    ) {
+        guard case .blocked(let failure) = result else {
+            Issue.record("Expected Apple Music playback to be blocked.")
             return
         }
 
