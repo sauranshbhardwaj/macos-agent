@@ -1,0 +1,185 @@
+import Foundation
+
+public enum RiskApprovalRule: String, Codable, CaseIterable, Equatable, Sendable {
+    case autoRun = "auto_run"
+    case autoRunUnlessPolicyRequiresApproval = "auto_run_unless_policy_requires_approval"
+    case previewOrLightweightConfirmation = "preview_or_lightweight_confirmation"
+    case explicitApprovalRequired = "explicit_approval_required"
+    case refuseOrRequireTakeover = "refuse_or_require_takeover"
+
+    public var displayName: String {
+        switch self {
+        case .autoRun:
+            return "Auto-run"
+        case .autoRunUnlessPolicyRequiresApproval:
+            return "Auto-run unless policy requires approval"
+        case .previewOrLightweightConfirmation:
+            return "Preview or lightweight confirmation"
+        case .explicitApprovalRequired:
+            return "Explicit approval required"
+        case .refuseOrRequireTakeover:
+            return "Refuse or require takeover"
+        }
+    }
+}
+
+public enum RiskApprovalRequirement: String, Codable, CaseIterable, Equatable, Sendable {
+    case autoRun = "auto_run"
+    case previewOnly = "preview_only"
+    case lightweightConfirmation = "lightweight_confirmation"
+    case explicitApproval = "explicit_approval"
+    case refuse = "refuse"
+}
+
+public enum Tier2ApprovalMode: String, Codable, CaseIterable, Equatable, Sendable {
+    case previewOnly = "preview_only"
+    case lightweightConfirmation = "lightweight_confirmation"
+}
+
+public struct RiskApprovalPolicy: Codable, Equatable, Sendable {
+    public static let `default` = RiskApprovalPolicy()
+
+    public var requireApprovalForTier1: Bool
+    public var tier2Mode: Tier2ApprovalMode
+
+    public init(
+        requireApprovalForTier1: Bool = false,
+        tier2Mode: Tier2ApprovalMode = .lightweightConfirmation
+    ) {
+        self.requireApprovalForTier1 = requireApprovalForTier1
+        self.tier2Mode = tier2Mode
+    }
+
+    public func requirement(for tier: CapabilityRiskTier) -> RiskApprovalRequirement {
+        switch tier {
+        case .tier0:
+            return .autoRun
+        case .tier1:
+            return requireApprovalForTier1 ? .lightweightConfirmation : .autoRun
+        case .tier2:
+            switch tier2Mode {
+            case .previewOnly:
+                return .previewOnly
+            case .lightweightConfirmation:
+                return .lightweightConfirmation
+            }
+        case .tier3:
+            return .explicitApproval
+        case .tier4:
+            return .refuse
+        }
+    }
+}
+
+public struct RiskApprovalCopy: Codable, Equatable, Sendable {
+    public var actionDescription: String
+    public var riskReason: String
+    public var involvedResource: String
+    public var dataLeavesDevice: Bool
+    public var undoDescription: String
+
+    public init(
+        actionDescription: String,
+        riskReason: String,
+        involvedResource: String,
+        dataLeavesDevice: Bool,
+        undoDescription: String
+    ) {
+        self.actionDescription = actionDescription
+        self.riskReason = riskReason
+        self.involvedResource = involvedResource
+        self.dataLeavesDevice = dataLeavesDevice
+        self.undoDescription = undoDescription
+    }
+
+    public var lines: [String] {
+        [
+            "What Sonny is about to do: \(actionDescription)",
+            "Why this is risky: \(riskReason)",
+            "Involves: \(involvedResource)",
+            "Data leaves device: \(dataLeavesDevice ? "yes" : "no")",
+            "Undo: \(undoDescription)"
+        ]
+    }
+}
+
+public struct CapabilityRiskEscalation: Codable, Equatable, Sendable {
+    public var fromTier: CapabilityRiskTier
+    public var toTier: CapabilityRiskTier
+    public var reason: String
+
+    public init(fromTier: CapabilityRiskTier, toTier: CapabilityRiskTier, reason: String) {
+        self.fromTier = fromTier
+        self.toTier = toTier
+        self.reason = reason
+    }
+}
+
+public struct CapabilityRiskAssessment: Codable, Equatable, Sendable {
+    public var defaultTier: CapabilityRiskTier
+    public var effectiveTier: CapabilityRiskTier
+    public var approvalCopy: RiskApprovalCopy?
+    public var escalations: [CapabilityRiskEscalation]
+
+    public init(
+        defaultTier: CapabilityRiskTier,
+        effectiveTier: CapabilityRiskTier? = nil,
+        approvalCopy: RiskApprovalCopy? = nil,
+        escalations: [CapabilityRiskEscalation] = []
+    ) {
+        self.defaultTier = defaultTier
+        self.effectiveTier = effectiveTier ?? Self.highestTier(defaultTier: defaultTier, escalations: escalations)
+        self.approvalCopy = approvalCopy
+        self.escalations = escalations
+    }
+
+    public func approvalRequirement(policy: RiskApprovalPolicy = .default) -> RiskApprovalRequirement {
+        policy.requirement(for: effectiveTier)
+    }
+
+    private static func highestTier(
+        defaultTier: CapabilityRiskTier,
+        escalations: [CapabilityRiskEscalation]
+    ) -> CapabilityRiskTier {
+        let highestRaw = escalations
+            .map(\.toTier.rawValue)
+            .reduce(defaultTier.rawValue, max)
+        return CapabilityRiskTier(rawValue: highestRaw) ?? defaultTier
+    }
+}
+
+public extension CapabilityRiskTier {
+    var semanticName: String {
+        switch self {
+        case .tier0:
+            return "Informational"
+        case .tier1:
+            return "Low impact"
+        case .tier2:
+            return "Local modification"
+        case .tier3:
+            return "External or destructive"
+        case .tier4:
+            return "Prohibited or unavailable"
+        }
+    }
+
+    var defaultApprovalRule: RiskApprovalRule {
+        switch self {
+        case .tier0:
+            return .autoRun
+        case .tier1:
+            return .autoRunUnlessPolicyRequiresApproval
+        case .tier2:
+            return .previewOrLightweightConfirmation
+        case .tier3:
+            return .explicitApprovalRequired
+        case .tier4:
+            return .refuseOrRequireTakeover
+        }
+    }
+
+    func approvalRequirement(policy: RiskApprovalPolicy = .default) -> RiskApprovalRequirement {
+        policy.requirement(for: self)
+    }
+}
