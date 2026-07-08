@@ -134,7 +134,7 @@ struct ContentView: View {
         HStack(spacing: 8) {
             HStack(spacing: 8) {
                 DryRunToggle(isOn: $viewModel.dryRun)
-                    .disabled(viewModel.isRunning)
+                    .disabled(viewModel.isRunning || viewModel.isAwaitingApproval)
 
                 Button {
                     viewModel.toggleVoiceRecording()
@@ -554,6 +554,10 @@ private struct RunDetailsView: View {
                         PreviewPanel(previews: viewModel.previews)
                     }
 
+                    if let approvalRequest = viewModel.approvalRequest {
+                        ApprovalPanel(request: approvalRequest)
+                    }
+
                     if logStore.events.isEmpty && viewModel.plan == nil && viewModel.previews.isEmpty && viewModel.finalSummary.isEmpty {
                         StartupPanel()
                     } else {
@@ -701,6 +705,33 @@ private struct PreviewPanel: View {
     }
 }
 
+private struct ApprovalPanel: View {
+    let request: RiskApprovalRequest
+
+    var body: some View {
+        Panel(title: "Approval", systemImage: "checkmark.shield") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Label(request.assessment.effectiveTier.displayName, systemImage: "exclamationmark.triangle")
+                        .font(SonnyType.caption)
+                        .foregroundStyle(SonnyTheme.warning)
+                    Text(request.requirement.displayName)
+                        .font(SonnyType.caption)
+                        .foregroundStyle(SonnyTheme.muted)
+                }
+
+                ForEach(request.approvalCopy.lines, id: \.self) { line in
+                    Text(line)
+                        .font(SonnyType.caption)
+                        .foregroundStyle(SonnyTheme.text.opacity(0.88))
+                        .lineSpacing(1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
 private struct LogPanel: View {
     @ObservedObject var logStore: AgentLogStore
 
@@ -730,6 +761,8 @@ private struct LogPanel: View {
             return SonnyTheme.cream.opacity(0.72)
         case .validate:
             return SonnyTheme.accent
+        case .risk:
+            return SonnyTheme.warning
         case .preview:
             return SonnyTheme.accent
         case .confirm:

@@ -25,6 +25,7 @@ final class AgentViewModel: ObservableObject {
     @Published var permissionItems: [PermissionReadinessItem] = []
     @Published var savedRoutines: [StoredRoutine] = []
     @Published var savedWorkspaces: [StoredWorkspace] = []
+    @Published var approvalRequest: RiskApprovalRequest?
 
     let logStore = AgentLogStore()
 
@@ -62,15 +63,22 @@ final class AgentViewModel: ObservableObject {
     }
 
     var canSubmit: Bool {
-        !isRunning && !isTranscribingVoice && hasAPIKey && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isAwaitingApproval {
+            return !isRunning && preparedRun != nil && runner != nil
+        }
+        return !isRunning && !isTranscribingVoice && hasAPIKey && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var canCancel: Bool {
-        isRunning && currentTask != nil
+        isAwaitingApproval || (isRunning && currentTask != nil)
     }
 
     var canUseVoice: Bool {
-        hasAPIKey && !isRunning && !isPreparingVoiceRecording && !isTranscribingVoice
+        hasAPIKey && !isAwaitingApproval && !isRunning && !isPreparingVoiceRecording && !isTranscribingVoice
+    }
+
+    var isAwaitingApproval: Bool {
+        approvalRequest != nil
     }
 
     var voiceButtonTitle: String {
@@ -90,11 +98,26 @@ final class AgentViewModel: ObservableObject {
         isRecordingVoice ? "stop.circle" : "mic"
     }
 
-    var primaryButtonTitle: String { dryRun ? "Preview" : "Run" }
+    var primaryButtonTitle: String {
+        if isAwaitingApproval {
+            return "Approve"
+        }
+        return dryRun ? "Preview" : "Run"
+    }
 
-    var primaryButtonIcon: String { dryRun ? "eye" : "play" }
+    var primaryButtonIcon: String {
+        if isAwaitingApproval {
+            return "checkmark.shield"
+        }
+        return dryRun ? "eye" : "play"
+    }
 
     func start(autoExecute: Bool = false) {
+        if isAwaitingApproval {
+            approvePendingRun()
+            return
+        }
+
         guard canSubmit else {
             if !hasAPIKey {
                 errorMessage = "OPENAI_API_KEY is not set. Export it before launching Sonny, then relaunch the app."
@@ -103,13 +126,13 @@ final class AgentViewModel: ObservableObject {
         }
 
         currentTask?.cancel()
+        isRunning = true
         currentTask = Task {
             await performStart(autoExecute: autoExecute)
         }
     }
 
     private func performStart(autoExecute: Bool) async {
-        isRunning = true
         errorMessage = nil
         finalSummary = ""
         plan = nil
@@ -118,6 +141,7 @@ final class AgentViewModel: ObservableObject {
         clarificationQuestion = nil
         clarificationAnswer = ""
         preparedRun = nil
+        approvalRequest = nil
         stepStatuses = [:]
 
         defer {
@@ -149,10 +173,33 @@ final class AgentViewModel: ObservableObject {
                 finalSummary = "Dry run complete. No files were written, no apps were opened, and no documents were converted."
                 logStore.append(.summarize, finalSummary)
             } else {
+                let request = try runner.approvalRequest(for: prepared, logAssessment: true)
+                switch request.requirement {
+                case .autoRun:
+                    break
+                case .lightweightConfirmation, .explicitApproval:
+                    approvalRequest = request
+                    finalSummary = "Approval needed before Sonny can act."
+                    logStore.append(.confirm, "Approval required for \(request.assessment.effectiveTier.displayName)")
+                    return
+                case .previewOnly:
+                    markAllSteps(.complete)
+                    finalSummary = "Preview complete. The current approval policy does not allow this action to run automatically."
+                    logStore.append(.summarize, finalSummary)
+                    return
+                case .refuse:
+                    markAllSteps(.failed)
+                    errorMessage = "Sonny refused this action under the current approval policy."
+                    logStore.append(.summarize, "Refused by approval policy")
+                    return
+                }
+
                 let result = try await executePreparedRun(
                     preparedRun: prepared,
                     runner: runner,
-                    confirmationMessage: autoExecute ? "Voice command auto-approved execution" : "Typed command auto-approved execution"
+                    approvalDecision: .notRequested,
+                    confirmationMessage: autoExecute ? "Voice command auto-approved execution" : "Typed command auto-approved execution",
+                    logRiskAssessment: false
                 )
                 finalSummary = result.summary
                 suggestions = result.suggestions
@@ -170,6 +217,16 @@ final class AgentViewModel: ObservableObject {
     }
 
     func cancelCurrentRun() {
+        if isAwaitingApproval {
+            approvalRequest = nil
+            preparedRun = nil
+            runner = nil
+            markAllSteps(.canceled)
+            finalSummary = "Approval canceled. No action was taken."
+            logStore.append(.summarize, "Approval canceled by user")
+            return
+        }
+
         currentTask?.cancel()
     }
 
@@ -300,6 +357,7 @@ final class AgentViewModel: ObservableObject {
         clarificationQuestion = nil
         clarificationAnswer = ""
         clarificationAutoExecute = false
+        approvalRequest = nil
         suggestions = []
         stepStatuses = [:]
         voiceTranscript = ""
@@ -404,12 +462,72 @@ final class AgentViewModel: ObservableObject {
     private func executePreparedRun(
         preparedRun: PreparedAgentRun,
         runner: AgentRunner,
-        confirmationMessage: String
+        approvalDecision: RiskApprovalDecision,
+        confirmationMessage: String,
+        logRiskAssessment: Bool
     ) async throws -> AgentRunResult {
         markAllSteps(.running)
-        let result = try await runner.execute(preparedRun, confirmationMessage: confirmationMessage)
+        let result = try await runner.execute(
+            preparedRun,
+            approvalDecision: approvalDecision,
+            confirmationMessage: confirmationMessage,
+            logRiskAssessment: logRiskAssessment
+        )
         markAllSteps(.complete)
         return result
+    }
+
+    private func approvePendingRun() {
+        guard !isRunning, let preparedRun, let runner, let approvalRequest else {
+            return
+        }
+
+        currentTask?.cancel()
+        isRunning = true
+        currentTask = Task {
+            await performApproval(preparedRun: preparedRun, runner: runner, approvalRequest: approvalRequest)
+        }
+    }
+
+    private func performApproval(
+        preparedRun: PreparedAgentRun,
+        runner: AgentRunner,
+        approvalRequest: RiskApprovalRequest
+    ) async {
+        errorMessage = nil
+        finalSummary = ""
+        self.approvalRequest = nil
+
+        defer {
+            isRunning = false
+            currentTask = nil
+        }
+
+        do {
+            let result = try await executePreparedRun(
+                preparedRun: preparedRun,
+                runner: runner,
+                approvalDecision: .approved(approvalRequest.assessment.effectiveTier),
+                confirmationMessage: "User approved \(approvalRequest.assessment.effectiveTier.displayName) action",
+                logRiskAssessment: true
+            )
+            finalSummary = result.summary
+            suggestions = result.suggestions
+            refreshSavedItems()
+        } catch is CancellationError {
+            markAllSteps(.canceled)
+            finalSummary = "Canceled."
+            logStore.append(.summarize, "Canceled by user")
+        } catch RiskApprovalError.approvalRequired(let request) {
+            markAllSteps(.pending)
+            self.approvalRequest = request
+            finalSummary = "Approval needed before Sonny can act."
+            logStore.append(.confirm, "Approval required for \(request.assessment.effectiveTier.displayName)")
+        } catch {
+            markAllSteps(.failed)
+            errorMessage = error.localizedDescription
+            logStore.append(.summarize, "Stopped: \(error.localizedDescription)")
+        }
     }
 
     private func initializeStepStatuses(for plan: AgentPlan) {

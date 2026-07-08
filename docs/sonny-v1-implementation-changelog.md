@@ -27,7 +27,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 | # | Branch | Spec sections | Status |
 |---|---|---|---|
 | 1 | `feature/capability-adapter-foundation` | §4A.0 | Complete (pending review) |
-| 2 | `feature/local-risk-approval-engine` | §10, §11, §11.1A | Not started |
+| 2 | `feature/local-risk-approval-engine` | §10, §11, §11.1A | Complete (pending review) |
 | 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Not started |
 | 4 | `feature/provider-media-playback` | §4A.4 | Not started |
 | 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Not started |
@@ -182,5 +182,103 @@ Primary target: §10, §11, §11.1A
 Just completed: feature/capability-adapter-foundation — existing prototype capabilities now route through protocol-based local capability adapters with registry-backed metadata while preserving planner/schema boundaries.
 Must preserve: largest-files zip default output stability and dry-run behavior; DOCX injected converter/mock/skip-existing-PDF behavior; Hacker News browser/fetch/Markdown write/reveal behavior; SafeURL HTTP/HTTPS-only validation; MacAppCatalog allowlist rejection; media provider/title validation and injected opener summaries; Finder selection whitelist validation; reveal-in-Finder preview-vs-execute existence distinction; permission readiness read-only semantics; save/run routine behavior; create/open workspace behavior and app-before-URL order; zip-plus-reveal chained execution.
 Known pitfalls to avoid repeating: routines require `previewNestedPlan`/`executeNestedPlan` recursion hooks because saved routines can contain mixed adapter-backed chains; Finder selection should use `FinderSelectionResolver`; do not reintroduce the removed transitional previews closure; required permissions metadata is descriptive-only until this branch defines enforcement; an existing `AsyncProcessRunner`/`NSTask` cancellation flake may appear in tests and is unrelated to adapter work unless reproduced against touched code.
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
+### Branch: feature/local-risk-approval-engine
+Status: complete
+Date: 2026-07-08
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §10, §11, and §11.1A complete for the local runtime. §9.3 is covered only for the minimal local `.risk`/`risk.escalated` log marker needed by §11.1A; full hosted Agent Trace Event Types remain out of scope.
+Files changed:
+- `Sources/MacAgent/AgentViewModel.swift`
+- `Sources/MacAgent/ContentView.swift`
+- `Sources/MacAgentCore/AgentActionExecutor.swift`
+- `Sources/MacAgentCore/AgentEvent.swift`
+- `Sources/MacAgentCore/AgentRunner.swift`
+- `Sources/MacAgentCore/CapabilityAdapter.swift`
+- `Sources/MacAgentCore/CreateWorkspaceCapabilityAdapter.swift`
+- `Sources/MacAgentCore/HackerNewsMarkdownCapabilityAdapter.swift`
+- `Sources/MacAgentCore/LargestFilesZipCapabilityAdapter.swift`
+- `Sources/MacAgentCore/RiskApproval.swift`
+- `Sources/MacAgentCore/RunRoutineCapabilityAdapter.swift`
+- `Sources/MacAgentCore/SaveRoutineCapabilityAdapter.swift`
+- `Tests/MacAgentCoreTests/AgentRunnerTests.swift`
+- `Tests/MacAgentCoreTests/RiskApprovalTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 78 tests in 10 suites.
+
+Behavior added:
+- Added the local risk-tier and approval-rule model: tier 0 auto-run, tier 1 auto-run unless policy tightens, tier 2 preview/lightweight-confirmation policy, tier 3 explicit approval, and tier 4 refusal.
+- Added `CapabilityRiskAssessment`, `CapabilityRiskEscalation`, `RiskApprovalPolicy`, `RiskApprovalRequest`, `RiskApprovalDecision`, and text-only `RiskApprovalCopy` fields covering what Sonny will do, why it is risky, the app/file/domain involved, whether data leaves the device, and undoability.
+- Added adapter-owned `assessRisk(plan:context:)` hooks to the `CapabilityAdapter` contract, defaulting to static `defaultRiskTier` so simple capabilities do not need custom risk code.
+- Added read-only `AgentActionExecutor.assessRisk(plan:)` to resolve default outputs, collect unique capability adapters in a plan/chain, combine default/effective tiers, collect escalations, and generate approval copy without making an approval decision or executing anything.
+- Added real tier gating in `AgentRunner`: it owns auto-run, lightweight-confirmation, explicit-approval, preview-only, and refusal decisions before calling `AgentActionExecutor.execute()`.
+- Preserved `AgentActionExecutor.execute(plan:log:)` as an unchanged direct-execution primitive for already-approved plans; direct executor tests remain execution tests, not approval tests.
+- Added dynamic validation-time escalation from tier 2 to tier 3 when a largest-files zip output path already exists.
+- Added dynamic validation-time escalation from tier 2 to tier 3 when a Hacker News Markdown output file already exists.
+- Added dynamic validation-time escalation from tier 2 to tier 3 when saving a routine would replace an existing routine with the same normalized name.
+- Added dynamic validation-time escalation from tier 2 to tier 3 when creating a workspace would replace an existing workspace with the same normalized name.
+- Added stale-approval protection: a stored `.approved(tier)` decision only authorizes execution if a fresh risk reassessment is still at or below that approved tier.
+- Added visible local risk logging through `AgentPhase.risk`, including `risk.assessed` and `risk.escalated` messages; this is deliberately not the hosted trace spine.
+- Added approval-pending UI state in `AgentViewModel`/`ContentView`: tier 2+ runs pause after preview with an approval panel, the primary button becomes `Approve`, cancel clears the pending run, approval re-runs risk assessment before execution, and tier 0/1 typed/voice runs continue without added friction.
+- Added synchronous `isRunning = true` before spawning start/approval tasks, closing the pre-existing fast double-click race for both normal start and approval execution.
+- Added `assessNestedPlan` to `CapabilityExecutionContext`, mirroring the existing nested preview/execute hooks so routine risk assessment recurses through the same executor dispatch path routine execution uses.
+- Added runner-level tests for tier 0/1 auto-run, tier 2 confirmation, tier 3 escalation, tier 4 refusal scaffolding, stale approval protection, approval UI-facing state behavior, nested routine escalation, and cross-capability zip-plus-reveal chain gating.
+
+Behavior preserved (required, no blanket claims):
+- Largest-files zip still preserves stable default output paths between preview and execution, still dry-runs without writing, still creates archives through the injected archiver, still suggests reveal behavior, and is now tier 2 gated by `AgentRunner`; if its explicit or resolved zip output already exists, it escalates to tier 3 before execution.
+- DOCX conversion still scans whitelisted folders, uses the injected converter/mock behavior, skips existing PDF outputs, dry-runs without writing, and remains tier 2 gated by `AgentRunner`; an existing destination PDF is still skip-existing behavior, not an overwrite escalation.
+- Hacker News Markdown still opens the fixed HN URL, fetches headlines through `HackerNewsFetching`, writes Markdown to the whitelisted output, dry-runs without writing, and is now tier 2 gated by `AgentRunner`; if the Markdown output already exists, it escalates to tier 3 before execution.
+- Safe URL opening still validates through `SafeURL.validateWebURL`, allows only HTTP/HTTPS, rejects unsupported schemes, opens through the injected browser opener, and stays tier 1 auto-run for typed and voice commands with no approval friction by default.
+- Allowlisted app opening still resolves apps through `MacAppCatalog`, rejects unknown apps, preserves the bundle-ID allowlist, opens through the injected app opener, and stays tier 1 auto-run for typed commands with no approval friction by default.
+- Media result opening still validates provider/title, builds the same `MediaPlaybackRequest`, preserves Apple Music/Spotify result-opening preview text, executes through the injected media opener, returns the opener summary, and stays tier 1 auto-run by default.
+- Finder selection still uses the shared Finder selection reader/resolver path, validates every selected item through the whitelist, reports whitelisted item count, and stays tier 0 auto-run because it is read-only context gathering.
+- Reveal in Finder still validates paths through the whitelist, allows preview of a future generated artifact, requires the path to exist at execution, opens Finder with `NSWorkspace.activateFileViewerSelecting`, and stays tier 1 auto-run by default.
+- Permission readiness still uses `PermissionReadinessService.currentStatus`, remains read-only/no-prompt/no-side-effect, reports required-action items in the existing summary format, and stays tier 0 auto-run.
+- Save routine still validates routine names and nested steps, rejects unsafe routine/workspace/clarify/unsupported/nested-routine steps, previews nested steps through normal plan preview, writes to `RoutineStore`, and is now tier 2 gated by `AgentRunner`; replacing an existing routine name escalates to tier 3 before execution.
+- Run routine still loads saved routines from `RoutineStore`, previews nested routine plans, executes nested plans through normal executor dispatch, preserves suggestions and the `Ran routine <name>. ...` summary prefix, and is now tier 2 gated by `AgentRunner`; nested routine plans now surface their own escalations in the outer approval request.
+- Create workspace still validates workspace names, allowlisted apps, safe URLs, non-empty app/URL content, previews `WorkspaceStore.fileURL`, saves through `WorkspaceStore`, and is now tier 2 gated by `AgentRunner`; replacing an existing workspace name escalates to tier 3 before execution.
+- Open workspace still loads from `WorkspaceStore`, validates allowlisted apps and safe URLs, opens apps before URLs, uses the injected app/browser openers, preserves app/URL count summaries, and stays tier 1 auto-run by default.
+- Zip-plus-reveal chained execution still segments the zip step and reveal step through top-level dispatch, resolves the reveal step to the produced zip artifact, preserves future-artifact preview behavior, and is now risk-assessed/gated once as a tier 2 chain before either segment executes.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- `dryRun` and tier-based approval are orthogonal. Dry-run remains preview-only mode; non-dry-run execution now goes through tier-aware approval in `AgentRunner`.
+- `AgentRunner` owns the approve/refuse decision. `AgentActionExecutor.assessRisk(plan:)` supplies read-only assessment because it has registry/context access, but `AgentActionExecutor.execute(plan:log:)` never gates by itself.
+- Keeping `AgentActionExecutor.execute()` as the already-approved primitive meant all pre-existing direct executor execution tests stayed valid and required zero approval rewrites.
+- `AgentPlan.requiresConfirmation` remains advisory. The authoritative local decision is the fresh `CapabilityRiskAssessment` plus `RiskApprovalPolicy`.
+- Tier 0/1 actions must remain frictionless for typed and voice flows by default. Tests now assert this explicitly for permission readiness, Finder selection, open URL, open app, media opening, reveal in Finder, and open workspace coverage paths.
+- Approval decisions carry the tier that was approved, not a Boolean. This is what lets a later reassessment reject stale tier 2 approval if the plan has escalated to tier 3.
+- The approval/start double-click task race existed before this branch in `start()` and was more visible once approval was introduced. Both `start()` and `approvePendingRun()` now set `isRunning = true` synchronously before spawning their tasks.
+- DOCX existing-PDF behavior is intentionally not an escalation because the adapter skips existing PDFs rather than overwriting or replacing them.
+- `assessNestedPlan` mirrors `previewNestedPlan` and `executeNestedPlan`; routines need all three because saved routines can contain mixed adapter-backed chains and must not bypass risk behavior.
+- Dynamic escalation belongs to the capability adapter contract, not ad hoc executor logic. The executor combines adapter assessments but does not invent capability-specific escalation rules.
+- `AgentPhase.risk` was added as a minimal local marker for visible assessment/escalation logs. Full hosted trace event taxonomy remains deferred to the hosted trace workstream.
+- Required-permissions metadata remains descriptive-only on this branch. The risk/approval system does not yet enforce macOS permission readiness or subscription/entitlement checks.
+- Finder selection is tier 0, not tier 1, because it only reads whitelisted local context. This was re-verified at the runner gating layer during checkpoint 4.
+Known limitations / deferred scope:
+- No Power Mode, Accessibility action space, generated shell, generated AppleScript, hosted trace spine, hosted backend, subscription/entitlement validation, Keychain/encrypted storage, provider playback, generic web research, Shortcuts bridge, instant utilities, follow-up correction, or usage transparency was implemented on this branch.
+- Tier 2 defaults to lightweight confirmation because there is still no settings UI for changing `RiskApprovalPolicy`.
+- No current first-party capability has static tier 3 or tier 4 metadata; tier 3 is exercised through real dynamic escalation and tier 4 through refusal scaffolding in tests.
+- Required permissions metadata remains descriptive-only until a later branch defines enforcement.
+Open questions for the next chat (required, write "none" if true): none.
+
+Next branch: `feature/web-research-app-foundation` (§4A.2, §4A.3), the first split local capability generalization branch. It is now unblocked because new web/app capabilities can plug into the real adapter risk hooks and `AgentRunner` approval gate instead of inventing their own confirmation path.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/web-research-app-foundation
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §4A.2, §4A.3
+
+Just completed: feature/local-risk-approval-engine — Sonny now has a local risk-tier/approval-rule model, adapter-owned dynamic escalation hooks, `AgentRunner`-owned approval gating, visible local risk logs, approval-pending UI state, stale-approval protection, and nested routine risk assessment.
+Must preserve: largest-files zip tier 2 gating plus tier 3 overwrite escalation and stable dry-run/default-output behavior; DOCX tier 2 gating plus skip-existing-PDF behavior with no overwrite escalation; Hacker News Markdown tier 2 gating plus tier 3 output-collision escalation; Safe URL tier 1 auto-run with HTTP/HTTPS-only validation; allowlisted app tier 1 auto-run with `MacAppCatalog` rejection; media result tier 1 auto-run with provider/title validation and injected opener summaries; Finder selection tier 0 auto-run with whitelist validation; reveal-in-Finder tier 1 auto-run with preview-vs-execute existence distinction; permission readiness tier 0 auto-run/read-only semantics; save routine tier 2 gating plus tier 3 replacement escalation; run routine tier 2 gating with nested risk assessment and nested dispatch; create workspace tier 2 gating plus tier 3 replacement escalation; open workspace tier 1 auto-run with app-before-URL order; zip-plus-reveal chain assessed/gated once before either segment executes.
+Known pitfalls to avoid repeating: `dryRun` is preview-only and orthogonal to approval; `AgentRunner` owns gating while `AgentActionExecutor.execute()` remains direct already-approved execution; new capability-specific escalation rules belong in adapter `assessRisk(plan:context:)`; approval decisions must carry the approved tier and be checked against fresh reassessment; routines need `assessNestedPlan`/`previewNestedPlan`/`executeNestedPlan` recursion hooks; DOCX skip-existing behavior is not an overwrite escalation; required-permissions metadata is still descriptive-only; `AgentPhase.risk` is only a minimal local log marker, not the hosted trace spine.
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.

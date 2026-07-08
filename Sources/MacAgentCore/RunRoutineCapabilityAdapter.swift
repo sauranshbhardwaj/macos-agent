@@ -38,6 +38,17 @@ public struct RunRoutineCapabilityAdapter: CapabilityAdapter {
         ] + nested
     }
 
+    public func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment {
+        let routine = try routineRunSpec(plan, context: context)
+        let nested = try context.assessNestedPlan(routine.plan)
+        let defaultTier = highestTier(metadata.defaultRiskTier, nested.defaultTier)
+        return CapabilityRiskAssessment(
+            defaultTier: defaultTier,
+            effectiveTier: highestTier(defaultTier, nested.effectiveTier),
+            escalations: nested.escalations
+        )
+    }
+
     public func execute(
         plan: AgentPlan,
         context: CapabilityExecutionContext,
@@ -59,5 +70,9 @@ public struct RunRoutineCapabilityAdapter: CapabilityAdapter {
             throw AgentExecutionError.invalidPlan("run_routine step is missing.")
         }
         return try context.routineStore.routine(named: step.routineName ?? "")
+    }
+
+    private func highestTier(_ first: CapabilityRiskTier, _ second: CapabilityRiskTier) -> CapabilityRiskTier {
+        first.rawValue >= second.rawValue ? first : second
     }
 }

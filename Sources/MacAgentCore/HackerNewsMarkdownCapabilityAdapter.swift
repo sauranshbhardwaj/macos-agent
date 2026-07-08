@@ -75,6 +75,20 @@ public struct HackerNewsMarkdownCapabilityAdapter: CapabilityAdapter {
         ]
     }
 
+    public func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment {
+        let spec = try spec(in: plan, context: context)
+        let escalations = context.fileManager.fileExists(atPath: spec.outputURL.path)
+            ? [
+                CapabilityRiskEscalation(
+                    fromTier: metadata.defaultRiskTier,
+                    toTier: .tier3,
+                    reason: "Markdown output already exists at \(spec.outputURL.path)."
+                )
+            ]
+            : []
+        return CapabilityRiskAssessment(defaultTier: metadata.defaultRiskTier, escalations: escalations)
+    }
+
     public func execute(
         plan: AgentPlan,
         context: CapabilityExecutionContext,

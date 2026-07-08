@@ -111,6 +111,24 @@ public final class AgentActionExecutor {
         return PreparedAgentRun(plan: resolvedPlan, previews: previews)
     }
 
+    public func assessRisk(plan: AgentPlan) throws -> CapabilityRiskAssessment {
+        let resolvedPlan = try resolveDefaultOutputs(in: plan)
+        let adapters = try capabilityAdapters(in: resolvedPlan)
+        let assessments = try adapters.map { adapter in
+            try adapter.assessRisk(plan: resolvedPlan, context: capabilityContext())
+        }
+        let metadata = adapters.map(\.metadata)
+        let defaultTier = highestRiskTier(in: assessments.map(\.defaultTier))
+        let effectiveTier = highestRiskTier(in: assessments.map(\.effectiveTier) + [defaultTier])
+        let escalations = assessments.flatMap(\.escalations)
+        return CapabilityRiskAssessment(
+            defaultTier: defaultTier,
+            effectiveTier: effectiveTier,
+            approvalCopy: approvalCopy(for: resolvedPlan, metadata: metadata, tier: effectiveTier),
+            escalations: escalations
+        )
+    }
+
     public func preview(plan: AgentPlan) throws -> [ActionPreview] {
         switch try workflow(in: plan) {
         case .clarify:
@@ -346,6 +364,137 @@ public final class AgentActionExecutor {
             .execute(plan: plan, context: capabilityContext(), log: log)
     }
 
+    private func capabilityAdapters(in plan: AgentPlan) throws -> [any CapabilityAdapter] {
+        var seen: Set<String> = []
+        var adapters: [any CapabilityAdapter] = []
+        for step in plan.steps {
+            let adapter = try capabilityRegistry.adapter(for: step.operation)
+            guard seen.insert(adapter.metadata.id).inserted else {
+                continue
+            }
+            adapters.append(adapter)
+        }
+        return adapters
+    }
+
+    private func highestRiskTier(in tiers: [CapabilityRiskTier]) -> CapabilityRiskTier {
+        let rawValue = tiers
+            .map(\.rawValue)
+            .reduce(CapabilityRiskTier.tier0.rawValue, max)
+        return CapabilityRiskTier(rawValue: rawValue) ?? .tier0
+    }
+
+    private func approvalCopy(
+        for plan: AgentPlan,
+        metadata: [CapabilityMetadata],
+        tier: CapabilityRiskTier
+    ) -> RiskApprovalCopy {
+        RiskApprovalCopy(
+            actionDescription: actionDescription(for: plan, metadata: metadata),
+            riskReason: riskReason(for: tier),
+            involvedResource: involvedResource(in: plan, metadata: metadata),
+            dataLeavesDevice: dataLeavesDevice(in: plan),
+            undoDescription: undoDescription(for: tier, plan: plan)
+        )
+    }
+
+    private func actionDescription(for plan: AgentPlan, metadata: [CapabilityMetadata]) -> String {
+        let summary = plan.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !summary.isEmpty {
+            return summary
+        }
+
+        let names = unique(metadata.map(\.displayName))
+        return names.isEmpty ? "Run the prepared plan" : names.joined(separator: ", ")
+    }
+
+    private func riskReason(for tier: CapabilityRiskTier) -> String {
+        switch tier {
+        case .tier0:
+            return "This only reads local context or status."
+        case .tier1:
+            return "This opens an app, URL, media result, or Finder location."
+        case .tier2:
+            return "This can create or change local files, routines, or workspaces."
+        case .tier3:
+            return "This may affect external services or overwrite/destructively change data."
+        case .tier4:
+            return "This is prohibited or unavailable in Sonny v1."
+        }
+    }
+
+    private func involvedResource(in plan: AgentPlan, metadata: [CapabilityMetadata]) -> String {
+        var resources: [String] = []
+
+        for step in plan.steps {
+            appendIfPresent(step.appName, to: &resources)
+            appendIfPresent(step.targetURL, to: &resources)
+            appendIfPresent(step.outputPath, to: &resources)
+            appendIfPresent(step.inputPath, to: &resources)
+            appendIfPresent(step.routineName.map { "Routine: \($0)" }, to: &resources)
+            appendIfPresent(step.workspaceName.map { "Workspace: \($0)" }, to: &resources)
+            if let provider = step.mediaProvider, let title = step.mediaTitle {
+                resources.append("\(provider.displayName): \(title)")
+            }
+            if step.operation == .openHackerNews || step.operation == .fetchHNHeadlines {
+                resources.append("https://news.ycombinator.com")
+            }
+        }
+
+        let cleaned = unique(resources.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+        if !cleaned.isEmpty {
+            return cleaned.prefix(3).joined(separator: ", ")
+        }
+
+        let names = unique(metadata.map(\.displayName))
+        return names.isEmpty ? "Prepared Sonny action" : names.joined(separator: ", ")
+    }
+
+    private func dataLeavesDevice(in plan: AgentPlan) -> Bool {
+        plan.steps.contains { step in
+            switch step.operation {
+            case .openHackerNews, .fetchHNHeadlines, .openURL, .playMedia, .openWorkspace:
+                return true
+            default:
+                return false
+            }
+        }
+    }
+
+    private func undoDescription(for tier: CapabilityRiskTier, plan: AgentPlan) -> String {
+        switch tier {
+        case .tier0:
+            return "No undo needed; Sonny is only reading status or context."
+        case .tier1:
+            return "Close the opened app, browser tab, media result, or Finder window."
+        case .tier2:
+            if plan.steps.contains(where: { [.saveRoutine, .createWorkspace].contains($0.operation) }) {
+                return "Edit or replace the saved routine/workspace manually."
+            }
+            return "Delete generated local files manually if needed."
+        case .tier3:
+            return "May not be automatically undoable."
+        case .tier4:
+            return "Sonny will not perform this action."
+        }
+    }
+
+    private func appendIfPresent(_ value: String?, to values: inout [String]) {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        values.append(value)
+    }
+
+    private func unique(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for value in values where seen.insert(value).inserted {
+            result.append(value)
+        }
+        return result
+    }
+
     private func capabilityContext() -> CapabilityExecutionContext {
         CapabilityExecutionContext(
             whitelist: whitelist,
@@ -363,6 +512,12 @@ public final class AgentActionExecutor {
             workspaceStore: workspaceStore,
             fileManager: fileManager,
             now: now,
+            assessNestedPlan: { [weak self] plan in
+                guard let self else {
+                    throw AgentExecutionError.invalidPlan("Executor is unavailable for nested risk assessment.")
+                }
+                return try self.assessRisk(plan: plan)
+            },
             previewNestedPlan: { [weak self] plan in
                 guard let self else {
                     throw AgentExecutionError.invalidPlan("Executor is unavailable for nested preview.")
