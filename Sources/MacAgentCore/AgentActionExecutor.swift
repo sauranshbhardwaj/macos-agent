@@ -113,11 +113,19 @@ public final class AgentActionExecutor {
 
     public func assessRisk(plan: AgentPlan) throws -> CapabilityRiskAssessment {
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
-        let metadata = try capabilityMetadata(in: resolvedPlan)
-        let defaultTier = highestRiskTier(in: metadata)
+        let adapters = try capabilityAdapters(in: resolvedPlan)
+        let assessments = try adapters.map { adapter in
+            try adapter.assessRisk(plan: resolvedPlan, context: capabilityContext())
+        }
+        let metadata = adapters.map(\.metadata)
+        let defaultTier = highestRiskTier(in: assessments.map(\.defaultTier))
+        let effectiveTier = highestRiskTier(in: assessments.map(\.effectiveTier) + [defaultTier])
+        let escalations = assessments.flatMap(\.escalations)
         return CapabilityRiskAssessment(
             defaultTier: defaultTier,
-            approvalCopy: approvalCopy(for: resolvedPlan, metadata: metadata, tier: defaultTier)
+            effectiveTier: effectiveTier,
+            approvalCopy: approvalCopy(for: resolvedPlan, metadata: metadata, tier: effectiveTier),
+            escalations: escalations
         )
     }
 
@@ -356,15 +364,22 @@ public final class AgentActionExecutor {
             .execute(plan: plan, context: capabilityContext(), log: log)
     }
 
-    private func capabilityMetadata(in plan: AgentPlan) throws -> [CapabilityMetadata] {
-        try plan.steps.map { step in
-            try capabilityRegistry.adapter(for: step.operation).metadata
+    private func capabilityAdapters(in plan: AgentPlan) throws -> [any CapabilityAdapter] {
+        var seen: Set<String> = []
+        var adapters: [any CapabilityAdapter] = []
+        for step in plan.steps {
+            let adapter = try capabilityRegistry.adapter(for: step.operation)
+            guard seen.insert(adapter.metadata.id).inserted else {
+                continue
+            }
+            adapters.append(adapter)
         }
+        return adapters
     }
 
-    private func highestRiskTier(in metadata: [CapabilityMetadata]) -> CapabilityRiskTier {
-        let rawValue = metadata
-            .map(\.defaultRiskTier.rawValue)
+    private func highestRiskTier(in tiers: [CapabilityRiskTier]) -> CapabilityRiskTier {
+        let rawValue = tiers
+            .map(\.rawValue)
             .reduce(CapabilityRiskTier.tier0.rawValue, max)
         return CapabilityRiskTier(rawValue: rawValue) ?? .tier0
     }

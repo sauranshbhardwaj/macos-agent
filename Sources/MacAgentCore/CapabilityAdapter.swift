@@ -181,6 +181,9 @@ public protocol CapabilityAdapter: Sendable {
     func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview]
 
     @MainActor
+    func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment
+
+    @MainActor
     func execute(
         plan: AgentPlan,
         context: CapabilityExecutionContext,
@@ -197,6 +200,11 @@ public extension CapabilityAdapter {
     @MainActor
     func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview] {
         throw CapabilityRegistryError.notExecutable(metadata.id)
+    }
+
+    @MainActor
+    func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment {
+        CapabilityRiskAssessment(defaultTier: metadata.defaultRiskTier)
     }
 
     @MainActor

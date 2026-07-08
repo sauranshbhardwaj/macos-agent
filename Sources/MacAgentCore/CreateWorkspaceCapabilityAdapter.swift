@@ -41,6 +41,20 @@ public struct CreateWorkspaceCapabilityAdapter: CapabilityAdapter {
         ]
     }
 
+    public func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment {
+        let workspace = try workspaceCreateSpec(plan, context: context)
+        let escalations = (try? context.workspaceStore.workspace(named: workspace.name)) != nil
+            ? [
+                CapabilityRiskEscalation(
+                    fromTier: metadata.defaultRiskTier,
+                    toTier: .tier3,
+                    reason: "Workspace named \(workspace.name) already exists and would be replaced."
+                )
+            ]
+            : []
+        return CapabilityRiskAssessment(defaultTier: metadata.defaultRiskTier, escalations: escalations)
+    }
+
     public func execute(
         plan: AgentPlan,
         context: CapabilityExecutionContext,

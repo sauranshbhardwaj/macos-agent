@@ -761,6 +761,8 @@ private struct LogPanel: View {
             return SonnyTheme.cream.opacity(0.72)
         case .validate:
             return SonnyTheme.accent
+        case .risk:
+            return SonnyTheme.warning
         case .preview:
             return SonnyTheme.accent
         case .confirm:

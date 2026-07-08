@@ -102,7 +102,7 @@ struct AgentRunnerTests {
 
         _ = try await runner.execute(
             prepared,
-            approvalDecision: .approved,
+            approvalDecision: .approved(request.assessment.effectiveTier),
             confirmationMessage: "User approved Tier 2 action"
         )
 
@@ -128,7 +128,7 @@ struct AgentRunnerTests {
         do {
             _ = try await runner.execute(
                 prepared,
-                approvalDecision: .approved,
+                approvalDecision: .approved(.tier4),
                 confirmationMessage: "User approved Tier 4 action"
             )
             Issue.record("Expected tier 4 execution to be refused.")
@@ -184,20 +184,170 @@ struct AgentRunnerTests {
         #expect(assessment.approvalCopy?.involvedResource.contains(output.path) == true)
     }
 
+    @Test
+    func existingZipOutputEscalatesToTierThreeAndLogsRiskEvent() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("small", to: root.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: root.appendingPathComponent("large.txt"))
+        let output = root.appendingPathComponent("largest.zip")
+        try write("existing zip", to: output)
+        let logStore = AgentLogStore()
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: largestPlan(root: root, output: output)),
+            executor: makeExecutor(root: root),
+            logStore: logStore
+        )
+
+        let prepared = try await runner.prepare(command: "Zip the largest files")
+        let request = try runner.approvalRequest(for: prepared, logAssessment: true)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.assessment.escalations == [
+            CapabilityRiskEscalation(
+                fromTier: .tier2,
+                toTier: .tier3,
+                reason: "Zip output already exists at \(output.path)."
+            )
+        ])
+        #expect(logStore.events.contains { event in
+            event.phase == .risk && event.message.contains("risk.escalated")
+        })
+    }
+
+    @Test
+    func staleTierTwoApprovalDoesNotAuthorizeLaterTierThreeEscalation() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("small", to: root.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: root.appendingPathComponent("large.txt"))
+        let output = root.appendingPathComponent("largest.zip")
+        let zipArchiver = RecordingZipArchiver()
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: largestPlan(root: root, output: output)),
+            executor: makeExecutor(root: root, zipArchiver: zipArchiver)
+        )
+
+        let prepared = try await runner.prepare(command: "Zip the largest files")
+        let originalRequest = try runner.approvalRequest(for: prepared)
+        try write("appeared after approval", to: output)
+
+        do {
+            _ = try await runner.execute(
+                prepared,
+                approvalDecision: .approved(originalRequest.assessment.effectiveTier),
+                confirmationMessage: "User approved Tier 2 action"
+            )
+            Issue.record("Expected later escalation to require a fresh approval.")
+        } catch RiskApprovalError.approvalRequired(let newRequest) {
+            #expect(originalRequest.assessment.effectiveTier == .tier2)
+            #expect(newRequest.assessment.effectiveTier == .tier3)
+            #expect(newRequest.requirement == .explicitApproval)
+        } catch {
+            Issue.record("Expected approvalRequired, got \(error).")
+        }
+
+        #expect(zipArchiver.createdArchives.isEmpty)
+    }
+
+    @Test
+    func existingHackerNewsMarkdownOutputEscalatesToTierThree() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("hn.md")
+        try write("existing markdown", to: output)
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: hnPlan(output: output)),
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Save Hacker News to Markdown")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.assessment.escalations.first?.reason == "Markdown output already exists at \(output.path).")
+    }
+
+    @Test
+    func replacingExistingRoutineEscalatesToTierThree() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        try routineStore.save(StoredRoutine(name: "Morning Setup", steps: [openAppStep(id: "existing-open")]))
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: saveRoutinePlan(name: "Morning Setup")),
+            executor: makeExecutor(root: root, routineStore: routineStore)
+        )
+
+        let prepared = try await runner.prepare(command: "Teach my morning setup")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.assessment.escalations.first?.reason == "Routine named Morning Setup already exists and would be replaced.")
+    }
+
+    @Test
+    func replacingExistingWorkspaceEscalatesToTierThree() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspaceStore = WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+        try workspaceStore.save(StoredWorkspace(name: "Research", apps: ["Safari"], urls: []))
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: createWorkspacePlan(name: "Research")),
+            executor: makeExecutor(root: root, workspaceStore: workspaceStore)
+        )
+
+        let prepared = try await runner.prepare(command: "Create a research workspace")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.assessment.escalations.first?.reason == "Workspace named Research already exists and would be replaced.")
+    }
+
+    @Test
+    func docxExistingPDFSkipDoesNotEscalate() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try write("docx", to: root.appendingPathComponent("a.docx"))
+        try write("existing pdf", to: root.appendingPathComponent("a.pdf"))
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: docxPlan(root: root)),
+            executor: makeExecutor(root: root, documentConverter: FakeDocumentConverter())
+        )
+
+        let prepared = try await runner.prepare(command: "Convert DOCX files")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier2)
+        #expect(request.assessment.escalations.isEmpty)
+        #expect(request.requirement == .lightweightConfirmation)
+    }
+
     private func makeExecutor(
         root: URL,
         zipArchiver: ZipArchiving = RecordingZipArchiver(),
+        documentConverter: DocumentConverting = FakeDocumentConverter(),
         browserOpener: BrowserOpening = NoopBrowserOpener(),
         appOpener: AppOpening = NoopAppOpener(),
+        routineStore: RoutineStore? = nil,
+        workspaceStore: WorkspaceStore? = nil,
         capabilityRegistry: CapabilityRegistry = .default
     ) -> AgentActionExecutor {
         AgentActionExecutor(
             whitelist: PathWhitelist(roots: [root]),
             zipArchiver: zipArchiver,
+            documentConverter: documentConverter,
             browserOpener: browserOpener,
             appOpener: appOpener,
-            routineStore: RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
-            workspaceStore: WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json")),
+            routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
+            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json")),
             capabilityRegistry: capabilityRegistry
         )
     }
@@ -256,6 +406,98 @@ struct AgentRunnerTests {
         )
     }
 
+    private func hnPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Save HN headlines.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open",
+                    operation: .openHackerNews,
+                    description: "Open HN.",
+                    targetURL: "https://news.ycombinator.com"
+                ),
+                AgentStep(
+                    id: "fetch",
+                    operation: .fetchHNHeadlines,
+                    description: "Fetch headlines.",
+                    count: 5,
+                    targetURL: "https://news.ycombinator.com"
+                ),
+                AgentStep(
+                    id: "write",
+                    operation: .writeMarkdown,
+                    description: "Write Markdown.",
+                    outputPath: output.path,
+                    count: 5
+                )
+            ]
+        )
+    }
+
+    private func saveRoutinePlan(name: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Teach routine.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "save-routine",
+                    operation: .saveRoutine,
+                    description: "Save routine.",
+                    routineName: name,
+                    routineSteps: [openAppStep(id: "open-safari")]
+                )
+            ]
+        )
+    }
+
+    private func createWorkspacePlan(name: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Create workspace.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "create-workspace",
+                    operation: .createWorkspace,
+                    description: "Create workspace.",
+                    workspaceName: name,
+                    workspaceApps: ["Safari"],
+                    workspaceURLs: ["https://github.com"]
+                )
+            ]
+        )
+    }
+
+    private func docxPlan(root: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Convert DOCX files.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "scan",
+                    operation: .scanDocx,
+                    description: "Scan DOCX.",
+                    inputPath: root.path
+                ),
+                AgentStep(
+                    id: "convert",
+                    operation: .convertDocxToPDF,
+                    description: "Convert DOCX.",
+                    inputPath: root.path
+                )
+            ]
+        )
+    }
+
+    private func openAppStep(id: String) -> AgentStep {
+        AgentStep(
+            id: id,
+            operation: .openApp,
+            description: "Open Safari.",
+            appName: "Safari"
+        )
+    }
+
     private func permissionReadinessPlan() -> AgentPlan {
         AgentPlan(
             summary: "Show permission readiness.",
@@ -308,6 +550,15 @@ private final class RecordingBrowserOpener: BrowserOpening {
 
 private struct NoopAppOpener: AppOpening {
     func open(bundleIdentifier: String) async throws {}
+}
+
+private struct FakeDocumentConverter: DocumentConverting {
+    var isAvailable: Bool { true }
+    var modeName: String { "Fake converter" }
+
+    func convert(_ records: [DocxRecord], log: @escaping (String) -> Void) async throws -> [DocxRecord] {
+        records.filter { !$0.skippedBecausePDFExists }
+    }
 }
 
 @MainActor

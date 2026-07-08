@@ -4,6 +4,7 @@ import Foundation
 public enum AgentPhase: String, Codable, CaseIterable, Sendable {
     case plan
     case validate
+    case risk
     case preview
     case confirm
     case act

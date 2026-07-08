@@ -153,9 +153,9 @@ public struct RiskApprovalRequest: Codable, Equatable, Sendable {
     }
 }
 
-public enum RiskApprovalDecision: String, Codable, Equatable, Sendable {
-    case notRequested = "not_requested"
-    case approved = "approved"
+public enum RiskApprovalDecision: Codable, Equatable, Sendable {
+    case notRequested
+    case approved(CapabilityRiskTier)
 }
 
 public enum RiskApprovalError: Error, Equatable, LocalizedError {

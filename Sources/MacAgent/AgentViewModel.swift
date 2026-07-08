@@ -126,13 +126,13 @@ final class AgentViewModel: ObservableObject {
         }
 
         currentTask?.cancel()
+        isRunning = true
         currentTask = Task {
             await performStart(autoExecute: autoExecute)
         }
     }
 
     private func performStart(autoExecute: Bool) async {
-        isRunning = true
         errorMessage = nil
         finalSummary = ""
         plan = nil
@@ -173,7 +173,7 @@ final class AgentViewModel: ObservableObject {
                 finalSummary = "Dry run complete. No files were written, no apps were opened, and no documents were converted."
                 logStore.append(.summarize, finalSummary)
             } else {
-                let request = try runner.approvalRequest(for: prepared)
+                let request = try runner.approvalRequest(for: prepared, logAssessment: true)
                 switch request.requirement {
                 case .autoRun:
                     break
@@ -198,7 +198,8 @@ final class AgentViewModel: ObservableObject {
                     preparedRun: prepared,
                     runner: runner,
                     approvalDecision: .notRequested,
-                    confirmationMessage: autoExecute ? "Voice command auto-approved execution" : "Typed command auto-approved execution"
+                    confirmationMessage: autoExecute ? "Voice command auto-approved execution" : "Typed command auto-approved execution",
+                    logRiskAssessment: false
                 )
                 finalSummary = result.summary
                 suggestions = result.suggestions
@@ -462,24 +463,27 @@ final class AgentViewModel: ObservableObject {
         preparedRun: PreparedAgentRun,
         runner: AgentRunner,
         approvalDecision: RiskApprovalDecision,
-        confirmationMessage: String
+        confirmationMessage: String,
+        logRiskAssessment: Bool
     ) async throws -> AgentRunResult {
         markAllSteps(.running)
         let result = try await runner.execute(
             preparedRun,
             approvalDecision: approvalDecision,
-            confirmationMessage: confirmationMessage
+            confirmationMessage: confirmationMessage,
+            logRiskAssessment: logRiskAssessment
         )
         markAllSteps(.complete)
         return result
     }
 
     private func approvePendingRun() {
-        guard let preparedRun, let runner, let approvalRequest else {
+        guard !isRunning, let preparedRun, let runner, let approvalRequest else {
             return
         }
 
         currentTask?.cancel()
+        isRunning = true
         currentTask = Task {
             await performApproval(preparedRun: preparedRun, runner: runner, approvalRequest: approvalRequest)
         }
@@ -490,7 +494,6 @@ final class AgentViewModel: ObservableObject {
         runner: AgentRunner,
         approvalRequest: RiskApprovalRequest
     ) async {
-        isRunning = true
         errorMessage = nil
         finalSummary = ""
         self.approvalRequest = nil
@@ -504,8 +507,9 @@ final class AgentViewModel: ObservableObject {
             let result = try await executePreparedRun(
                 preparedRun: preparedRun,
                 runner: runner,
-                approvalDecision: .approved,
-                confirmationMessage: "User approved \(approvalRequest.assessment.effectiveTier.displayName) action"
+                approvalDecision: .approved(approvalRequest.assessment.effectiveTier),
+                confirmationMessage: "User approved \(approvalRequest.assessment.effectiveTier.displayName) action",
+                logRiskAssessment: true
             )
             finalSummary = result.summary
             suggestions = result.suggestions
@@ -514,6 +518,11 @@ final class AgentViewModel: ObservableObject {
             markAllSteps(.canceled)
             finalSummary = "Canceled."
             logStore.append(.summarize, "Canceled by user")
+        } catch RiskApprovalError.approvalRequired(let request) {
+            markAllSteps(.pending)
+            self.approvalRequest = request
+            finalSummary = "Approval needed before Sonny can act."
+            logStore.append(.confirm, "Approval required for \(request.assessment.effectiveTier.displayName)")
         } catch {
             markAllSteps(.failed)
             errorMessage = error.localizedDescription

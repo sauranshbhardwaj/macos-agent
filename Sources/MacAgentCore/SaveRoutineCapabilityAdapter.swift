@@ -39,6 +39,20 @@ public struct SaveRoutineCapabilityAdapter: CapabilityAdapter {
         ]
     }
 
+    public func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment {
+        let spec = try routineSaveSpec(plan, context: context)
+        let escalations = (try? context.routineStore.routine(named: spec.routine.name)) != nil
+            ? [
+                CapabilityRiskEscalation(
+                    fromTier: metadata.defaultRiskTier,
+                    toTier: .tier3,
+                    reason: "Routine named \(spec.routine.name) already exists and would be replaced."
+                )
+            ]
+            : []
+        return CapabilityRiskAssessment(defaultTier: metadata.defaultRiskTier, escalations: escalations)
+    }
+
     public func execute(
         plan: AgentPlan,
         context: CapabilityExecutionContext,

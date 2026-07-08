@@ -35,25 +35,34 @@ public final class AgentRunner {
         return preparedRun
     }
 
-    public func approvalRequest(for preparedRun: PreparedAgentRun) throws -> RiskApprovalRequest {
+    public func approvalRequest(
+        for preparedRun: PreparedAgentRun,
+        logAssessment: Bool = false
+    ) throws -> RiskApprovalRequest {
         let assessment = try executor.assessRisk(plan: preparedRun.plan)
-        return RiskApprovalRequest(
+        let request = RiskApprovalRequest(
             assessment: assessment,
             requirement: assessment.approvalRequirement(policy: approvalPolicy)
         )
+        if logAssessment {
+            logRiskAssessment(request)
+        }
+        return request
     }
 
     public func execute(
         _ preparedRun: PreparedAgentRun,
         approvalDecision: RiskApprovalDecision = .notRequested,
-        confirmationMessage: String = "Execution approved"
+        confirmationMessage: String = "Execution approved",
+        logRiskAssessment: Bool = true
     ) async throws -> AgentRunResult {
-        let request = try approvalRequest(for: preparedRun)
+        let request = try approvalRequest(for: preparedRun, logAssessment: logRiskAssessment)
         switch request.requirement {
         case .autoRun:
             break
         case .lightweightConfirmation, .explicitApproval:
-            guard approvalDecision == .approved else {
+            guard case .approved(let approvedTier) = approvalDecision,
+                  approvedTier.rawValue >= request.assessment.effectiveTier.rawValue else {
                 logStore.append(.confirm, "Approval required for \(request.assessment.effectiveTier.displayName)")
                 throw RiskApprovalError.approvalRequired(request)
             }
@@ -68,6 +77,21 @@ public final class AgentRunner {
         logStore.append(.confirm, confirmationMessage)
         return try await executor.execute(plan: preparedRun.plan) { phase, message in
             self.logStore.append(phase, message)
+        }
+    }
+
+    private func logRiskAssessment(_ request: RiskApprovalRequest) {
+        let assessment = request.assessment
+        logStore.append(
+            .risk,
+            "risk.assessed: \(assessment.effectiveTier.displayName) (\(assessment.effectiveTier.semanticName)); approval: \(request.requirement.displayName)"
+        )
+
+        for escalation in assessment.escalations {
+            logStore.append(
+                .risk,
+                "risk.escalated: \(escalation.fromTier.displayName) -> \(escalation.toTier.displayName): \(escalation.reason)"
+            )
         }
     }
 }
