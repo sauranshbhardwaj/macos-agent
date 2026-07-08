@@ -111,6 +111,7 @@ public struct CapabilityMetadata: Equatable, Sendable {
 }
 
 public struct CapabilityExecutionContext {
+    public typealias AssessNestedPlan = @MainActor (AgentPlan) throws -> CapabilityRiskAssessment
     public typealias PreviewNestedPlan = @MainActor (AgentPlan) throws -> [ActionPreview]
     public typealias ExecuteNestedPlan = @MainActor (AgentPlan, @escaping (AgentPhase, String) -> Void) async throws -> AgentRunResult
 
@@ -129,6 +130,7 @@ public struct CapabilityExecutionContext {
     public var workspaceStore: WorkspaceStore
     public var fileManager: FileManager
     public var now: () -> Date
+    public var assessNestedPlan: AssessNestedPlan
     public var previewNestedPlan: PreviewNestedPlan
     public var executeNestedPlan: ExecuteNestedPlan
 
@@ -148,6 +150,7 @@ public struct CapabilityExecutionContext {
         workspaceStore: WorkspaceStore,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
+        assessNestedPlan: @escaping AssessNestedPlan,
         previewNestedPlan: @escaping PreviewNestedPlan,
         executeNestedPlan: @escaping ExecuteNestedPlan
     ) {
@@ -166,6 +169,7 @@ public struct CapabilityExecutionContext {
         self.workspaceStore = workspaceStore
         self.fileManager = fileManager
         self.now = now
+        self.assessNestedPlan = assessNestedPlan
         self.previewNestedPlan = previewNestedPlan
         self.executeNestedPlan = executeNestedPlan
     }

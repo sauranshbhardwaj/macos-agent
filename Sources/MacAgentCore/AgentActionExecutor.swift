@@ -512,6 +512,12 @@ public final class AgentActionExecutor {
             workspaceStore: workspaceStore,
             fileManager: fileManager,
             now: now,
+            assessNestedPlan: { [weak self] plan in
+                guard let self else {
+                    throw AgentExecutionError.invalidPlan("Executor is unavailable for nested risk assessment.")
+                }
+                return try self.assessRisk(plan: plan)
+            },
             previewNestedPlan: { [weak self] plan in
                 guard let self else {
                     throw AgentExecutionError.invalidPlan("Executor is unavailable for nested preview.")
