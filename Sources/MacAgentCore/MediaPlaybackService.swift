@@ -77,6 +77,50 @@ public protocol AppleMusicCatalogSearching: Sendable {
     func bestTrack(for request: MediaPlaybackRequest) async throws -> AppleMusicCatalogTrack?
 }
 
+public enum MediaPlaybackFailureReason: String, Codable, CaseIterable, Equatable, Sendable {
+    case authorization
+    case subscriptionPremium = "subscription_premium"
+    case activeDevice = "active_device"
+    case catalogMatch = "catalog_match"
+    case providerOutage = "provider_outage"
+}
+
+public struct MediaPlaybackBlockers: Equatable, Sendable {
+    public var authorizationBlocked: Bool
+    public var subscriptionBlocked: Bool
+    public var activeDeviceBlocked: Bool
+    public var catalogMatchBlocked: Bool
+    public var providerOutageBlocked: Bool
+
+    public init(
+        authorizationBlocked: Bool = false,
+        subscriptionBlocked: Bool = false,
+        activeDeviceBlocked: Bool = false,
+        catalogMatchBlocked: Bool = false,
+        providerOutageBlocked: Bool = false
+    ) {
+        self.authorizationBlocked = authorizationBlocked
+        self.subscriptionBlocked = subscriptionBlocked
+        self.activeDeviceBlocked = activeDeviceBlocked
+        self.catalogMatchBlocked = catalogMatchBlocked
+        self.providerOutageBlocked = providerOutageBlocked
+    }
+}
+
+public enum MediaPlaybackFailureDiagnosis {
+    public static func diagnose(_ blockers: MediaPlaybackBlockers) -> MediaPlaybackFailureReason? {
+        let orderedReasons: [(MediaPlaybackFailureReason, Bool)] = [
+            (.authorization, blockers.authorizationBlocked),
+            (.subscriptionPremium, blockers.subscriptionBlocked),
+            (.activeDevice, blockers.activeDeviceBlocked),
+            (.catalogMatch, blockers.catalogMatchBlocked),
+            (.providerOutage, blockers.providerOutageBlocked)
+        ]
+
+        return orderedReasons.first { $0.1 }?.0
+    }
+}
+
 public enum MediaPlaybackError: Error, LocalizedError, Equatable {
     case missingProvider
     case missingTitle

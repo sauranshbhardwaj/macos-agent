@@ -5,6 +5,66 @@ import Testing
 @Suite(.serialized)
 struct MediaPlaybackServiceTests {
     @Test
+    func mediaPlaybackFailureDiagnosisReturnsNilWhenNothingBlocksPlayback() {
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(MediaPlaybackBlockers()) == nil)
+    }
+
+    @Test
+    func mediaPlaybackFailureDiagnosisReportsAuthorizationFirstWhenAllBlockersApply() {
+        let blockers = MediaPlaybackBlockers(
+            authorizationBlocked: true,
+            subscriptionBlocked: true,
+            activeDeviceBlocked: true,
+            catalogMatchBlocked: true,
+            providerOutageBlocked: true
+        )
+
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(blockers) == .authorization)
+    }
+
+    @Test
+    func mediaPlaybackFailureDiagnosisUsesFixedPrecedenceOrder() {
+        let expectations: [(MediaPlaybackBlockers, MediaPlaybackFailureReason)] = [
+            (
+                MediaPlaybackBlockers(authorizationBlocked: true),
+                .authorization
+            ),
+            (
+                MediaPlaybackBlockers(subscriptionBlocked: true),
+                .subscriptionPremium
+            ),
+            (
+                MediaPlaybackBlockers(activeDeviceBlocked: true),
+                .activeDevice
+            ),
+            (
+                MediaPlaybackBlockers(catalogMatchBlocked: true),
+                .catalogMatch
+            ),
+            (
+                MediaPlaybackBlockers(providerOutageBlocked: true),
+                .providerOutage
+            ),
+            (
+                MediaPlaybackBlockers(subscriptionBlocked: true, activeDeviceBlocked: true),
+                .subscriptionPremium
+            ),
+            (
+                MediaPlaybackBlockers(activeDeviceBlocked: true, catalogMatchBlocked: true),
+                .activeDevice
+            ),
+            (
+                MediaPlaybackBlockers(catalogMatchBlocked: true, providerOutageBlocked: true),
+                .catalogMatch
+            )
+        ]
+
+        for (blockers, expectedReason) in expectations {
+            #expect(MediaPlaybackFailureDiagnosis.diagnose(blockers) == expectedReason)
+        }
+    }
+
+    @Test
     func iTunesSearchReturnsAppleMusicAlbumLink() async throws {
         AppleMusicFixtureURLProtocol.handler = { request in
             #expect(request.url?.path == "/search")
