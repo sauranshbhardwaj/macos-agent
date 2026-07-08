@@ -452,11 +452,12 @@ struct AgentRunnerTests {
         let result = try await runner.execute(prepared)
 
         #expect(request.assessment.effectiveTier == .tier1)
+        #expect(request.assessment.escalations.isEmpty)
         #expect(request.requirement == .autoRun)
         #expect(mediaOpener.requests == [
             MediaPlaybackRequest(provider: .appleMusic, title: "Bad Habit", artist: "Steve Lacy")
         ])
-        #expect(result.summary == "Opened Bad Habit by Steve Lacy in Apple Music.")
+        #expect(result.summary == "Apple Music playback unavailable (authorization): Apple Music playback provider not configured. Fallback result: Opened Bad Habit by Steve Lacy in Apple Music.")
     }
 
     @Test

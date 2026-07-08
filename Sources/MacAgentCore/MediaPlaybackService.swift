@@ -130,6 +130,29 @@ public enum MediaPlaybackFailureDiagnosis {
     }
 }
 
+public enum MediaPlaybackRoute: String, Codable, Equatable, Sendable {
+    case search
+    case play
+    case transferPlayback = "transfer_playback"
+    case fallbackOpen = "fallback_open"
+}
+
+public struct MediaPlaybackRoutePreview: Equatable, Sendable {
+    public var route: MediaPlaybackRoute
+    public var detail: String
+    public var failureReason: MediaPlaybackFailureReason?
+
+    public init(
+        route: MediaPlaybackRoute,
+        detail: String,
+        failureReason: MediaPlaybackFailureReason? = nil
+    ) {
+        self.route = route
+        self.detail = detail
+        self.failureReason = failureReason
+    }
+}
+
 public struct SpotifyTrackCandidate: Equatable, Sendable {
     public var uri: String
     public var title: String
@@ -248,11 +271,20 @@ public enum SpotifyPlaybackResult: Equatable, Sendable {
 
 @MainActor
 public protocol SpotifyPlaybackProviding {
+    func preview(_ request: MediaPlaybackRequest) -> MediaPlaybackRoutePreview
     func play(_ request: MediaPlaybackRequest) async -> SpotifyPlaybackResult
 }
 
 public struct UnavailableSpotifyPlaybackProvider: SpotifyPlaybackProviding {
     public init() {}
+
+    public func preview(_ request: MediaPlaybackRequest) -> MediaPlaybackRoutePreview {
+        MediaPlaybackRoutePreview(
+            route: .fallbackOpen,
+            detail: "Spotify playback provider not configured.",
+            failureReason: .authorization
+        )
+    }
 
     public func play(_ request: MediaPlaybackRequest) async -> SpotifyPlaybackResult {
         .blocked(
@@ -265,6 +297,33 @@ public struct UnavailableSpotifyPlaybackProvider: SpotifyPlaybackProviding {
 }
 
 public enum SpotifyPlaybackResolver {
+    public static func preview(
+        request: MediaPlaybackRequest,
+        state: SpotifyPlaybackState
+    ) -> MediaPlaybackRoutePreview {
+        switch resolve(request: request, state: state) {
+        case .started(let start):
+            switch start.action {
+            case .play:
+                return MediaPlaybackRoutePreview(
+                    route: .play,
+                    detail: "Spotify can play \(start.track.title) on \(start.device.name)."
+                )
+            case .transferAndPlay:
+                return MediaPlaybackRoutePreview(
+                    route: .transferPlayback,
+                    detail: "Spotify can transfer playback to \(start.device.name), then play \(start.track.title)."
+                )
+            }
+        case .blocked(let failure):
+            return MediaPlaybackRoutePreview(
+                route: .fallbackOpen,
+                detail: failure.detail,
+                failureReason: failure.reason
+            )
+        }
+    }
+
     public static func resolve(
         request: MediaPlaybackRequest,
         state: SpotifyPlaybackState
@@ -426,11 +485,20 @@ public enum AppleMusicPlaybackResult: Equatable, Sendable {
 
 @MainActor
 public protocol AppleMusicPlaybackProviding {
+    func preview(_ request: MediaPlaybackRequest) -> MediaPlaybackRoutePreview
     func play(_ request: MediaPlaybackRequest) async -> AppleMusicPlaybackResult
 }
 
 public struct UnavailableAppleMusicPlaybackProvider: AppleMusicPlaybackProviding {
     public init() {}
+
+    public func preview(_ request: MediaPlaybackRequest) -> MediaPlaybackRoutePreview {
+        MediaPlaybackRoutePreview(
+            route: .fallbackOpen,
+            detail: "Apple Music playback provider not configured.",
+            failureReason: .authorization
+        )
+    }
 
     public func play(_ request: MediaPlaybackRequest) async -> AppleMusicPlaybackResult {
         .blocked(
@@ -443,6 +511,25 @@ public struct UnavailableAppleMusicPlaybackProvider: AppleMusicPlaybackProviding
 }
 
 public enum AppleMusicPlaybackResolver {
+    public static func preview(
+        request: MediaPlaybackRequest,
+        state: AppleMusicPlaybackState
+    ) -> MediaPlaybackRoutePreview {
+        switch resolve(request: request, state: state) {
+        case .started(let start):
+            return MediaPlaybackRoutePreview(
+                route: .play,
+                detail: "Apple Music can queue and play \(start.track.title)."
+            )
+        case .blocked(let failure):
+            return MediaPlaybackRoutePreview(
+                route: .fallbackOpen,
+                detail: failure.detail,
+                failureReason: failure.reason
+            )
+        }
+    }
+
     public static func resolve(
         request: MediaPlaybackRequest,
         state: AppleMusicPlaybackState

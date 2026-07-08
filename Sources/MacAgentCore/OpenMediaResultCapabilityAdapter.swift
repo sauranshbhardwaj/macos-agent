@@ -9,20 +9,20 @@ public struct OpenMediaResultCapabilityAdapter: CapabilityAdapter {
 
     public static let metadata = CapabilityMetadata(
         id: "local.media.open-result",
-        displayName: "Open music result",
-        description: "Open Apple Music or Spotify result/search URLs without starting playback.",
+        displayName: "Play or open music",
+        description: "Try provider-aware Apple Music or Spotify playback, falling back to opening the provider result or search.",
         operations: [.playMedia],
         plannerTools: [
             AgentTool(
                 operation: .playMedia,
-                name: "Open music result",
-                description: "Open a requested song or album in Apple Music or Spotify without starting playback. Apple Music opens the best matching catalog album result when found, otherwise search. Spotify opens a supplied Spotify result URI or a Spotify search.",
+                name: "Play or open music",
+                description: "Try to play a requested song or album in Apple Music or Spotify through the provider playback seam. If playback is unavailable, open the exact provider result URI when supplied, or open the provider search/result fallback.",
                 requiredFields: ["mediaProvider", "mediaTitle"],
-                sideEffects: ["open music app"],
-                dryRunBehavior: "Show the provider, title, artist, and result/search behavior without opening an app.",
+                sideEffects: ["play or open music app"],
+                dryRunBehavior: "Show whether Sonny would search, play, transfer playback, or fall back to opening without starting playback or opening an app.",
                 examples: [
-                    "Open Jimmy Cooks by Drake on Apple Music",
-                    "Open Bad Habit by Steve Lacy on Spotify"
+                    "Play Jimmy Cooks by Drake on Apple Music",
+                    "Play Bad Habit by Steve Lacy on Spotify"
                 ]
             )
         ],
@@ -35,12 +35,15 @@ public struct OpenMediaResultCapabilityAdapter: CapabilityAdapter {
 
     public func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview] {
         let spec = try mediaSpec(plan)
+        let routePreview = playbackPreview(for: spec.request, context: context)
         return [
             ActionPreview(
-                title: "Open \(spec.request.displayTitle)",
+                title: "Play \(spec.request.displayTitle)",
                 details: [
                     "Provider: \(spec.request.provider.displayName)",
-                    spec.behaviorDescription
+                    "Playback route: \(routeLabel(routePreview.route))",
+                    routePreview.detail,
+                    fallbackBehaviorDescription(for: spec.request)
                 ],
                 opens: [spec.request.provider.displayName]
             )
@@ -54,15 +57,32 @@ public struct OpenMediaResultCapabilityAdapter: CapabilityAdapter {
     ) async throws -> AgentRunResult {
         let previews = try preview(plan: plan, context: context)
         let spec = try mediaSpec(plan)
-        log(.act, "Opening \(spec.request.provider.displayName) result for \(spec.request.displayTitle)")
-        let summary = try await context.mediaOpener.open(spec.request)
+        log(.act, "Trying \(spec.request.provider.displayName) playback for \(spec.request.displayTitle)")
+        let summary: String
+        switch spec.request.provider {
+        case .appleMusic:
+            let playback = await context.appleMusicPlaybackProvider.play(spec.request)
+            summary = try await playbackSummary(
+                for: playback,
+                request: spec.request,
+                context: context,
+                log: log
+            )
+        case .spotify:
+            let playback = await context.spotifyPlaybackProvider.play(spec.request)
+            summary = try await playbackSummary(
+                for: playback,
+                request: spec.request,
+                context: context,
+                log: log
+            )
+        }
         log(.summarize, summary)
         return AgentRunResult(plan: plan, previews: previews, summary: summary)
     }
 
     private struct MediaSpec {
         var request: MediaPlaybackRequest
-        var behaviorDescription: String
     }
 
     private func mediaSpec(_ plan: AgentPlan) throws -> MediaSpec {
@@ -85,18 +105,126 @@ public struct OpenMediaResultCapabilityAdapter: CapabilityAdapter {
             mediaURI: step.targetURL
         )
 
-        let behavior: String
-        switch provider {
+        return MediaSpec(request: request)
+    }
+
+    @MainActor
+    private func playbackPreview(
+        for request: MediaPlaybackRequest,
+        context: CapabilityExecutionContext
+    ) -> MediaPlaybackRoutePreview {
+        switch request.provider {
         case .appleMusic:
-            behavior = "Opens the best matching Apple Music album result, or Apple Music search if no match is found."
+            return context.appleMusicPlaybackProvider.preview(request)
+        case .spotify:
+            return context.spotifyPlaybackProvider.preview(request)
+        }
+    }
+
+    private func fallbackBehaviorDescription(for request: MediaPlaybackRequest) -> String {
+        switch request.provider {
+        case .appleMusic:
+            if let mediaURI = request.mediaURI, !mediaURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Fallback: open the supplied Apple Music result URI."
+            }
+            return "Fallback: open the best matching Apple Music catalog result, or Apple Music search if no match is found."
         case .spotify:
             if let mediaURI = request.mediaURI, !mediaURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                behavior = "Opens the supplied Spotify result URI."
-            } else {
-                behavior = "Opens Spotify search for the requested song or album."
+                return "Fallback: open the supplied Spotify result URI."
             }
+            return "Fallback: open Spotify search for the requested song or album."
         }
+    }
 
-        return MediaSpec(request: request, behaviorDescription: behavior)
+    private func routeLabel(_ route: MediaPlaybackRoute) -> String {
+        switch route {
+        case .search:
+            return "search"
+        case .play:
+            return "play"
+        case .transferPlayback:
+            return "transfer-playback"
+        case .fallbackOpen:
+            return "fallback-open"
+        }
+    }
+
+    @MainActor
+    private func playbackSummary(
+        for playback: SpotifyPlaybackResult,
+        request: MediaPlaybackRequest,
+        context: CapabilityExecutionContext,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> String {
+        switch playback {
+        case .started(let start):
+            switch start.action {
+            case .play:
+                return "Started Spotify playback for \(start.track.title) by \(start.track.artistDisplayName)."
+            case .transferAndPlay:
+                return "Transferred Spotify playback to \(start.device.name) and started \(start.track.title) by \(start.track.artistDisplayName)."
+            }
+        case .blocked(let failure):
+            return try await fallbackSummary(
+                provider: .spotify,
+                reason: failure.reason,
+                detail: failure.detail,
+                request: request,
+                context: context,
+                log: log
+            )
+        }
+    }
+
+    @MainActor
+    private func playbackSummary(
+        for playback: AppleMusicPlaybackResult,
+        request: MediaPlaybackRequest,
+        context: CapabilityExecutionContext,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> String {
+        switch playback {
+        case .started(let start):
+            return "Started Apple Music playback for \(start.track.title) by \(start.track.artist)."
+        case .blocked(let failure):
+            return try await fallbackSummary(
+                provider: .appleMusic,
+                reason: failure.reason,
+                detail: failure.detail,
+                request: request,
+                context: context,
+                log: log
+            )
+        }
+    }
+
+    @MainActor
+    private func fallbackSummary(
+        provider: MediaProvider,
+        reason: MediaPlaybackFailureReason,
+        detail: String,
+        request: MediaPlaybackRequest,
+        context: CapabilityExecutionContext,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> String {
+        log(.observe, "\(provider.displayName) playback blocked: \(reasonLabel(reason))")
+        log(.act, "Opening \(provider.displayName) fallback for \(request.displayTitle)")
+        let fallback = try await context.mediaOpener.open(request)
+        return "\(provider.displayName) playback unavailable (\(reasonLabel(reason))): \(detail) Fallback result: \(fallback)"
+    }
+
+    private func reasonLabel(_ reason: MediaPlaybackFailureReason) -> String {
+        switch reason {
+        case .authorization:
+            return "authorization"
+        case .subscriptionPremium:
+            return "subscription/Premium"
+        case .activeDevice:
+            return "active device"
+        case .catalogMatch:
+            return "catalog match"
+        case .providerOutage:
+            return "provider outage"
+        }
     }
 }
