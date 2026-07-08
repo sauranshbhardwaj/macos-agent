@@ -10,9 +10,36 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
     public static let metadata = CapabilityMetadata(
         id: "local.web.research-markdown",
         displayName: "Web research Markdown",
-        description: "Fetch public web pages, synthesize a research note, and save Markdown with source links.",
-        operations: [.webToMarkdown],
+        description: "Fetch public web pages or preset sources, synthesize Markdown, and save source-linked notes.",
+        operations: [.openHackerNews, .fetchHNHeadlines, .writeMarkdown, .webToMarkdown],
         plannerTools: [
+            AgentTool(
+                operation: .openHackerNews,
+                name: "Open Hacker News",
+                description: "Open Hacker News in the default browser as part of the headline workflow.",
+                requiredFields: [],
+                sideEffects: ["open browser"],
+                dryRunBehavior: "Show that Hacker News would open.",
+                examples: ["Open Hacker News"]
+            ),
+            AgentTool(
+                operation: .fetchHNHeadlines,
+                name: "Fetch Hacker News headlines",
+                description: "Fetch the top Hacker News headlines from the public API.",
+                requiredFields: ["count"],
+                sideEffects: ["network request"],
+                dryRunBehavior: "Show the number of headlines that would be fetched.",
+                examples: ["Grab the top 5 headlines"]
+            ),
+            AgentTool(
+                operation: .writeMarkdown,
+                name: "Write Markdown file",
+                description: "Write fetched Hacker News headlines to Markdown in a whitelisted output path.",
+                requiredFields: [],
+                sideEffects: ["write file"],
+                dryRunBehavior: "Show the Markdown path without writing it.",
+                examples: ["Save to a Markdown file"]
+            ),
             AgentTool(
                 operation: .webToMarkdown,
                 name: "Web page to Markdown",
@@ -35,16 +62,37 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
 
     public func resolveDefaultOutputs(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> AgentPlan {
         var resolvedPlan = plan
+        if let markdownIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .writeMarkdown }) {
+            resolvedPlan.steps[markdownIndex].outputPath = try hackerNewsSpec(in: resolvedPlan, context: context).outputURL.path
+            return resolvedPlan
+        }
+
         guard let stepIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .webToMarkdown }) else {
             return resolvedPlan
         }
 
-        resolvedPlan.steps[stepIndex].outputPath = try spec(in: resolvedPlan, context: context).outputURL.path
+        resolvedPlan.steps[stepIndex].outputPath = try webResearchSpec(in: resolvedPlan, context: context).outputURL.path
         return resolvedPlan
     }
 
     public func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview] {
-        let spec = try spec(in: plan, context: context)
+        if isHackerNewsPreset(plan) {
+            let spec = try hackerNewsSpec(in: plan, context: context)
+            return [
+                ActionPreview(
+                    title: "Fetch Hacker News top \(spec.count)",
+                    details: [
+                        "Open https://news.ycombinator.com",
+                        "Fetch top \(spec.count) headlines",
+                        "Save Markdown to \(spec.outputURL.path)"
+                    ],
+                    writes: [spec.outputURL.path],
+                    opens: [Self.hackerNewsURL.absoluteString]
+                )
+            ]
+        }
+
+        let spec = try webResearchSpec(in: plan, context: context)
         return [
             ActionPreview(
                 title: spec.sourceURLs.count == 1 ? "Save web article Markdown" : "Save web comparison Markdown",
@@ -58,13 +106,13 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
     }
 
     public func assessRisk(plan: AgentPlan, context: CapabilityExecutionContext) throws -> CapabilityRiskAssessment {
-        let spec = try spec(in: plan, context: context)
-        let escalations = context.fileManager.fileExists(atPath: spec.outputURL.path)
+        let outputURL = try outputURLForRiskAssessment(in: plan, context: context)
+        let escalations = context.fileManager.fileExists(atPath: outputURL.path)
             ? [
                 CapabilityRiskEscalation(
                     fromTier: metadata.defaultRiskTier,
                     toTier: .tier3,
-                    reason: "Markdown output already exists at \(spec.outputURL.path)."
+                    reason: "Markdown output already exists at \(outputURL.path)."
                 )
             ]
             : []
@@ -77,8 +125,12 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
         log: @escaping (AgentPhase, String) -> Void
     ) async throws -> AgentRunResult {
         let resolvedPlan = try resolveDefaultOutputs(in: plan, context: context)
+        if isHackerNewsPreset(resolvedPlan) {
+            return try await executeHackerNewsPreset(plan: resolvedPlan, context: context, log: log)
+        }
+
         let previews = try preview(plan: resolvedPlan, context: context)
-        let spec = try spec(in: resolvedPlan, context: context)
+        let spec = try webResearchSpec(in: resolvedPlan, context: context)
 
         var pages: [ReadableWebPage] = []
         for sourceURL in spec.sourceURLs {
@@ -116,7 +168,49 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
         var instruction: String
     }
 
-    private func spec(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> WebResearchSpec {
+    private static let hackerNewsURL = URL(string: "https://news.ycombinator.com")!
+
+    private struct HackerNewsSpec {
+        var count: Int
+        var outputURL: URL
+    }
+
+    private func isHackerNewsPreset(_ plan: AgentPlan) -> Bool {
+        plan.steps.contains { step in
+            [.openHackerNews, .fetchHNHeadlines, .writeMarkdown].contains(step.operation)
+        }
+    }
+
+    private func outputURLForRiskAssessment(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> URL {
+        if isHackerNewsPreset(plan) {
+            return try hackerNewsSpec(in: plan, context: context).outputURL
+        }
+
+        return try webResearchSpec(in: plan, context: context).outputURL
+    }
+
+    @MainActor
+    private func executeHackerNewsPreset(
+        plan: AgentPlan,
+        context: CapabilityExecutionContext,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> AgentRunResult {
+        let previews = try preview(plan: plan, context: context)
+        let spec = try hackerNewsSpec(in: plan, context: context)
+        log(.act, "Opening Hacker News")
+        try await context.browserOpener.open(Self.hackerNewsURL)
+        log(.act, "Fetching top \(spec.count) headlines")
+        let headlines = try await context.hackerNewsFetcher.topHeadlines(limit: spec.count)
+        log(.observe, "Fetched \(headlines.count) headlines")
+        let markdown = MarkdownWriter.hackerNewsMarkdown(headlines: headlines, date: context.now())
+        try markdown.data(using: .utf8)?.write(to: spec.outputURL, options: .atomic)
+        log(.summarize, "Saved Markdown")
+
+        let summary = "Saved \(headlines.count) Hacker News headlines to \(spec.outputURL.path)."
+        return AgentRunResult(plan: plan, previews: previews, summary: summary, suggestions: suggestions(for: spec))
+    }
+
+    private func webResearchSpec(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> WebResearchSpec {
         guard let step = plan.steps.first(where: { $0.operation == .webToMarkdown }) else {
             throw AgentExecutionError.invalidPlan("web_to_markdown step is missing.")
         }
@@ -129,6 +223,35 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
             .first { !$0.isEmpty } ?? "Create a concise Markdown research note from the supplied web source(s)."
 
         return WebResearchSpec(sourceURLs: sourceURLs, outputURL: outputURL, instruction: instruction)
+    }
+
+    private func hackerNewsSpec(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> HackerNewsSpec {
+        let writeStep = plan.steps.first { $0.operation == .writeMarkdown }
+        let fetchStep = plan.steps.first { $0.operation == .fetchHNHeadlines }
+        let count = max(fetchStep?.count ?? writeStep?.count ?? 5, 1)
+
+        let outputURL: URL
+        if let rawOutput = writeStep?.outputPath, !rawOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let expanded = (rawOutput as NSString).expandingTildeInPath
+            if context.fileManager.fileExists(atPath: expanded) {
+                let url = try context.whitelist.validateInsideWhitelist(rawOutput)
+                let values = try url.resourceValues(forKeys: [.isDirectoryKey])
+                if values.isDirectory == true {
+                    outputURL = url.appendingPathComponent("hacker-news-\(Timestamp.fileSafe(context.now())).md")
+                } else {
+                    outputURL = try context.whitelist.validateOutputPath(rawOutput)
+                }
+            } else {
+                outputURL = try context.whitelist.validateOutputPath(rawOutput)
+            }
+        } else {
+            outputURL = try context.whitelist.defaultOutputFile(
+                name: "hacker-news-\(Timestamp.fileSafe(context.now()))",
+                extension: "md"
+            )
+        }
+
+        return HackerNewsSpec(count: count, outputURL: outputURL)
     }
 
     private func sourceStrings(in step: AgentStep) throws -> [String] {
@@ -168,6 +291,21 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
     }
 
     private func suggestions(for spec: WebResearchSpec) -> [RunSuggestion] {
+        [
+            RunSuggestion(
+                title: "Open Markdown",
+                kind: .openFile,
+                value: spec.outputURL.path
+            ),
+            RunSuggestion(
+                title: "Reveal Markdown in Finder",
+                kind: .revealInFinder,
+                value: spec.outputURL.path
+            )
+        ]
+    }
+
+    private func suggestions(for spec: HackerNewsSpec) -> [RunSuggestion] {
         [
             RunSuggestion(
                 title: "Open Markdown",

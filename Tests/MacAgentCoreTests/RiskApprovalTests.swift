@@ -95,7 +95,6 @@ struct RiskApprovalTests {
             "local.workspaces.open": .tier1,
             "local.files.largest-files-zip": .tier2,
             "local.documents.docx-to-pdf": .tier2,
-            "local.web.hacker-news-markdown": .tier2,
             "local.web.research-markdown": .tier2,
             "local.routines.save": .tier2,
             "local.routines.run": .tier2,
