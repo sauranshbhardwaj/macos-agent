@@ -28,7 +28,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 |---|---|---|---|
 | 1 | `feature/capability-adapter-foundation` | §4A.0 | Complete (pending review) |
 | 2 | `feature/local-risk-approval-engine` | §10, §11, §11.1A | Complete (pending review) |
-| 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Not started |
+| 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Complete (pending review) |
 | 4 | `feature/provider-media-playback` | §4A.4 | Not started |
 | 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Not started |
 | 6 | `feature/followup-usage-transparency` | §4A.8, §4A.9 | Not started |
@@ -280,5 +280,101 @@ Primary target: §4A.2, §4A.3
 Just completed: feature/local-risk-approval-engine — Sonny now has a local risk-tier/approval-rule model, adapter-owned dynamic escalation hooks, `AgentRunner`-owned approval gating, visible local risk logs, approval-pending UI state, stale-approval protection, and nested routine risk assessment.
 Must preserve: largest-files zip tier 2 gating plus tier 3 overwrite escalation and stable dry-run/default-output behavior; DOCX tier 2 gating plus skip-existing-PDF behavior with no overwrite escalation; Hacker News Markdown tier 2 gating plus tier 3 output-collision escalation; Safe URL tier 1 auto-run with HTTP/HTTPS-only validation; allowlisted app tier 1 auto-run with `MacAppCatalog` rejection; media result tier 1 auto-run with provider/title validation and injected opener summaries; Finder selection tier 0 auto-run with whitelist validation; reveal-in-Finder tier 1 auto-run with preview-vs-execute existence distinction; permission readiness tier 0 auto-run/read-only semantics; save routine tier 2 gating plus tier 3 replacement escalation; run routine tier 2 gating with nested risk assessment and nested dispatch; create workspace tier 2 gating plus tier 3 replacement escalation; open workspace tier 1 auto-run with app-before-URL order; zip-plus-reveal chain assessed/gated once before either segment executes.
 Known pitfalls to avoid repeating: `dryRun` is preview-only and orthogonal to approval; `AgentRunner` owns gating while `AgentActionExecutor.execute()` remains direct already-approved execution; new capability-specific escalation rules belong in adapter `assessRisk(plan:context:)`; approval decisions must carry the approved tier and be checked against fresh reassessment; routines need `assessNestedPlan`/`previewNestedPlan`/`executeNestedPlan` recursion hooks; DOCX skip-existing behavior is not an overwrite escalation; required-permissions metadata is still descriptive-only; `AgentPhase.risk` is only a minimal local log marker, not the hosted trace spine.
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
+### Branch: feature/web-research-app-foundation
+Status: complete
+Date: 2026-07-08
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §4A.2 complete for direct public URL web-to-Markdown, comparison notes from multiple sources, Hacker News as a provider preset, output save/open/reveal behavior, robots/login/CAPTCHA/paywall refusal, and the required untrusted-content boundary/red-team fixture. §4A.2 remains partial for production topic/search because this branch shipped the `WebSearchProviding` protocol seam and fixture-backed tests only; no real provider is configured. §4A.3 complete for the scoped local app/website action foundation: declarative descriptors, app search URLs, local draft artifacts, generated artifact opening, and existing reveal reuse. Active browser page import, logged-in/private browser content, unrestricted multi-URL user input parsing, hosted search, and UI control of apps are intentionally deferred.
+Files changed:
+- `Package.swift`
+- `Package.resolved`
+- `Sources/MacAgent/ContentView.swift`
+- `Sources/MacAgentCore/AgentActionExecutor.swift`
+- `Sources/MacAgentCore/AgentPlan.swift`
+- `Sources/MacAgentCore/AppWebsiteActionDescriptors.swift`
+- `Sources/MacAgentCore/CapabilityAdapter.swift`
+- `Sources/MacAgentCore/CreateLocalDraftCapabilityAdapter.swift`
+- `Sources/MacAgentCore/DefaultCapabilityAdapters.swift`
+- `Sources/MacAgentCore/HackerNewsMarkdownCapabilityAdapter.swift` (deleted; behavior moved into `WebResearchMarkdownCapabilityAdapter`)
+- `Sources/MacAgentCore/OpenAIPlanner.swift`
+- `Sources/MacAgentCore/OpenAllowlistedAppCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenAppSearchURLCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenGeneratedArtifactCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenSafeURLCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenWorkspaceCapabilityAdapter.swift`
+- `Sources/MacAgentCore/WebResearchMarkdownCapabilityAdapter.swift`
+- `Sources/MacAgentCore/WebResearchService.swift`
+- `Sources/MacAgentCore/WebResearchSynthesizer.swift`
+- `Tests/MacAgentCoreTests/AgentActionExecutorTests.swift`
+- `Tests/MacAgentCoreTests/AgentRunnerTests.swift`
+- `Tests/MacAgentCoreTests/CapabilityRegistryTests.swift`
+- `Tests/MacAgentCoreTests/PlannerBoundaryTests.swift`
+- `Tests/MacAgentCoreTests/RiskApprovalTests.swift`
+- `Tests/MacAgentCoreTests/ToolRegistryTests.swift`
+- `Tests/MacAgentCoreTests/WebResearchServiceTests.swift`
+- `Tests/MacAgentCoreTests/WebResearchSynthesizerTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 100 tests in 12 suites.
+
+Behavior added:
+- Added `web_to_markdown` direct URL support: validates public `http`/`https` URLs, checks robots.txt, fetches public HTML without browser cookies or logged-in context, rejects login/CAPTCHA/paywall-like pages, extracts readable page content through SwiftSoup-backed parsing, synthesizes a structured note, and writes source-linked Markdown with retrieval/generated timestamps.
+- Added `web_to_markdown` comparison-note support: multiple resolved source pages can be fetched, wrapped separately as untrusted observed content, synthesized into one comparison note, and saved to a whitelisted Markdown path.
+- Added `web_to_markdown` topic/search support at the adapter seam: `AgentStep.searchQuery` routes through `WebSearchProviding` with the same tier 2 risk path, output-collision escalation, synthesis, and Markdown save flow as direct URLs; production intentionally uses `UnavailableWebSearchProvider` and fails clearly with `Web search provider not configured.`
+- Added `source=hacker_news` preset behavior inside `WebResearchMarkdownCapabilityAdapter`: the existing `open_hacker_news`, `fetch_hn_headlines`, and `write_markdown` operation sequence now routes through the generic web research adapter instead of a separate HN adapter.
+- Added `open_app_search_url`: tier 1 action that opens only fixed allowlisted search URL templates for Google, GitHub, YouTube, Apple Music, and Spotify; it does not click, type, scroll, or otherwise control apps.
+- Added `open_generated_artifact`: tier 1 action that opens an existing whitelisted generated file through the injected file opener and supports chained null-output resolution from the previous produced artifact.
+- Added `create_local_draft`: tier 2 action that creates only a local whitelisted Markdown draft artifact, suggests opening/revealing it, and escalates to tier 3 before overwriting an existing draft path.
+
+Behavior preserved (required, no blanket claims):
+- Hacker News Markdown still opens the fixed `https://news.ycombinator.com` URL, fetches headlines through `HackerNewsFetching`, writes the same `MarkdownWriter.hackerNewsMarkdown(...)` structure to the whitelisted output, dry-runs without writing, suggests opening/revealing the Markdown file, stays tier 2 by default, and escalates to tier 3 with the exact reason `Markdown output already exists at <path>.`
+- The existing HN operation sequence `open_hacker_news -> fetch_hn_headlines -> write_markdown` still routes correctly; the old adapter file was removed so there is one implementation path rather than parallel HN code.
+- Safe URL opening still validates through `SafeURL.validateWebURL`, permits only HTTP/HTTPS, rejects unsupported schemes, opens through the injected browser opener, and now reads its metadata from the shared app/website action descriptor.
+- Allowlisted app opening still resolves apps through `MacAppCatalog`, rejects unknown apps, preserves the bundle-ID allowlist, opens through the injected app opener, and now reads its metadata from the shared app/website action descriptor.
+- Open workspace still loads saved workspaces from `WorkspaceStore`, validates allowlisted apps and safe URLs, opens apps before URLs, uses injected openers, preserves app/URL count summaries, and now reads its metadata from the shared app/website action descriptor.
+- Reveal in Finder remains the generic reveal file/folder action; it still validates paths through the whitelist, supports future-artifact preview, requires the path to exist during execution, and opens Finder through `NSWorkspace.activateFileViewerSelecting`.
+- Tier gating from `feature/local-risk-approval-engine` remains owned by `AgentRunner`; the new web/draft overwrite escalations live in adapter-owned `assessRisk(plan:context:)`, and stale approval protection still requires a fresh reassessment before execution.
+- `AgentActionExecutor.execute(plan:log:)` remains the already-approved execution primitive; no new capability introduced a parallel confirmation or approval mechanism.
+- Existing zip-plus-reveal chained execution still resolves reveal steps to the previous produced artifact, and the same shared chain resolution now also supports `open_generated_artifact`.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- SwiftSoup `2.13.5` is the repo's first third-party dependency and is pinned deliberately in `Package.swift`/`Package.resolved`. It was added because §4A.2 requires real HTML parsing/readability-style extraction rather than ad hoc string slicing; Sonny-owned extraction still does the product-specific scoring and metadata shaping.
+- Fetched web content never enters `OpenAIPlanner.plan(command:)`. The executable `AgentPlan` is decided from the trusted user command first; only after that does `WebResearchMarkdownCapabilityAdapter.execute(...)` fetch pages and call the separate `OpenAIWebResearchSynthesizer`.
+- The web synthesis prompt uses strict `WebResearchNote` structured output, not executable `AgentPlan` JSON. The trusted instruction is wrapped with `TRUSTED_USER_INSTRUCTION_BEGIN/END`; each fetched page is sent as a separate observed-content message wrapped with `UNTRUSTED_OBSERVED_CONTENT_BEGIN id=... source_url=... retrieved_at=...` and `UNTRUSTED_OBSERVED_CONTENT_END id=...`.
+- The permanent red-team fixture in `WebResearchSynthesizerTests` includes observed HTML text that says to ignore prior instructions and emit fake plan/tool directives. Tests assert the trusted plan/instruction remain unchanged, the malicious text appears only inside the delimited untrusted segment, and execution writes only the expected Markdown artifact with fixed suggestions.
+- The app/website action foundation now uses `LocalActionDescriptor` / `AppWebsiteActionDescriptors` for supported actions, required permissions, default risk tier, and fallback behavior. This keeps app/URL/workspace/draft/open-artifact metadata declarative without loosening app bundle allowlists or website URL validation.
+- `open_app_search_url` intentionally uses fixed URL templates instead of arbitrary user-provided URL templates, AppleScript, Accessibility, or app UI control. Provider media playback remains branch #4; Power Mode remains branch #14.
+- `open_generated_artifact` extends the existing chained null-output artifact resolution used by `reveal_in_finder`; future artifact-opening actions should share this runtime helper rather than reimplement previous-step path lookup.
+- `WebSearchProviding` was added as a protocol seam so a real provider can be wired into the existing `web_to_markdown` adapter later without changing risk tiering, output escalation, Markdown writing, or synthesis boundaries.
+
+Known limitations / deferred scope:
+- Production topic/search is not fully wired. This branch shipped the protocol-only `WebSearchProviding` seam plus fixture-backed search tests, while production uses `UnavailableWebSearchProvider` and returns `Web search provider not configured.` A real search-provider decision, credentials/runtime boundary, and provider implementation must be resolved before the v1 major release is announced.
+- The §21.0A Workstream 0 topic/search exit criterion is therefore only partially satisfied: the adapter path and tests exist, but a configured production search provider does not.
+- Active-browser-page input and logged-in/private browser content are not implemented. Sonny does not use browser cookies or private session state for web research in this branch.
+- Explicit arbitrary multi-URL user parsing is not implemented; comparison support exists for multiple source URLs once the planner/provider supplies them.
+- Paywall, CAPTCHA, robots.txt denial, and login-wall bypass are not implemented; those cases are refused rather than worked around.
+- No unrestricted app UI control, Accessibility clicking/typing/scrolling, real provider media playback, hosted backend/search, Keychain/encrypted storage, instant utilities, Shortcuts bridge, follow-up correction, or usage transparency was implemented on this branch.
+Open questions for the next chat (required, write "none" if true):
+- Which production web search provider to use for `WebSearchProviding` remains open and must be resolved before announcing v1; it does not block `feature/provider-media-playback`.
+
+Next branch: `feature/provider-media-playback` (§4A.4), converting the existing media-result-opening fallback into provider-aware Spotify/Apple Music playback where first-party provider APIs allow it.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/provider-media-playback
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §4A.4
+
+Just completed: feature/web-research-app-foundation — Sonny now has a generic web-to-Markdown capability with SwiftSoup-backed extraction, strict untrusted-content separation, Markdown save/open/reveal behavior, HN as a preset inside the generic adapter, a protocol-only search seam, and descriptor-backed app/website actions including app search URLs, generated-artifact opening, and local draft creation.
+Must preserve: web-to-Markdown direct URL tier 2 behavior with robots/login/CAPTCHA/paywall refusal, source links, timestamps, open/reveal suggestions, and tier 3 output-collision escalation; comparison-note support from multiple resolved sources; production topic/search must continue to fail clearly with `Web search provider not configured.` until a real provider is explicitly selected; Hacker News must keep the fixed HN URL, `HackerNewsFetching`, exact Markdown output structure, dry-run behavior, open/reveal suggestions, tier 2 gating, and exact tier 3 collision reason; `open_app_search_url` must remain fixed-template tier 1 URL opening only; `open_generated_artifact` must remain tier 1 whitelisted file opening with chained null-output resolution; `create_local_draft` must remain tier 2 local Markdown only with tier 3 overwrite escalation; app bundle allowlists and safe URL validation must not loosen; `AgentRunner` must continue to own approval gating and `AgentActionExecutor.execute()` must remain already-approved execution.
+Known pitfalls to avoid repeating: fetched or observed external content must not enter executable `AgentPlan` generation; use the separate strict-schema untrusted-content prompt path for summarization; new capability-specific escalation belongs in adapter `assessRisk(plan:context:)`; do not add a parallel confirmation path; use the shared previous-artifact chain resolver for generated artifact follow-ups; do not introduce app UI clicking/typing/scrolling for media playback because Power Mode is branch #14; production web search remains intentionally unavailable until a provider is chosen.
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
