@@ -129,6 +129,7 @@ public struct CapabilityExecutionContext {
     public var routineStore: RoutineStore
     public var workspaceStore: WorkspaceStore
     public var webPageLoader: PublicWebPageLoader
+    public var webSearchProvider: any WebSearchProviding
     public var webResearchSynthesizer: any WebResearchSynthesizing
     public var fileManager: FileManager
     public var now: () -> Date
@@ -151,6 +152,7 @@ public struct CapabilityExecutionContext {
         routineStore: RoutineStore,
         workspaceStore: WorkspaceStore,
         webPageLoader: PublicWebPageLoader,
+        webSearchProvider: any WebSearchProviding,
         webResearchSynthesizer: any WebResearchSynthesizing,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
@@ -172,6 +174,7 @@ public struct CapabilityExecutionContext {
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
         self.webPageLoader = webPageLoader
+        self.webSearchProvider = webSearchProvider
         self.webResearchSynthesizer = webResearchSynthesizer
         self.fileManager = fileManager
         self.now = now

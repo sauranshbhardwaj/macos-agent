@@ -294,6 +294,28 @@ struct AgentRunnerTests {
     }
 
     @Test
+    func existingWebSearchMarkdownOutputUsesWebResearchRiskPath() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("search.md")
+        try write("existing markdown", to: output)
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: webSearchPlan(output: output)),
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Research Swift concurrency as Markdown")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.approvalCopy.dataLeavesDevice == true)
+        #expect(request.approvalCopy.involvedResource.contains("Search: Swift concurrency"))
+        #expect(request.assessment.escalations.first?.reason == "Markdown output already exists at \(output.path).")
+    }
+
+    @Test
     func replacingExistingRoutineEscalatesToTierThree() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -707,6 +729,22 @@ struct AgentRunnerTests {
                     description: "Create web Markdown.",
                     outputPath: output.path,
                     targetURL: "https://example.com/article"
+                )
+            ]
+        )
+    }
+
+    private func webSearchPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Research Swift concurrency as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web-search",
+                    operation: .webToMarkdown,
+                    description: "Research Swift concurrency.",
+                    outputPath: output.path,
+                    searchQuery: "Swift concurrency"
                 )
             ]
         )

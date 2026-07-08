@@ -8,6 +8,8 @@ public enum WebResearchError: Error, Equatable, LocalizedError {
     case invalidTextEncoding(String)
     case restrictedContent(String)
     case noReadableContent(String)
+    case searchProviderNotConfigured
+    case noSearchResults(String)
 
     public var errorDescription: String? {
         switch self {
@@ -23,6 +25,10 @@ public enum WebResearchError: Error, Equatable, LocalizedError {
             return "Sonny will not bypass \(reason)."
         case .noReadableContent(let url):
             return "No readable article content was found at \(url)."
+        case .searchProviderNotConfigured:
+            return "Web search provider not configured."
+        case .noSearchResults(let query):
+            return "No web search results were found for \(query)."
         }
     }
 }
@@ -122,6 +128,31 @@ public protocol RobotsTXTChecking {
 
 public protocol ReadableWebExtracting {
     func extract(html: String, sourceURL: URL, retrievedAt: Date) throws -> ReadableWebPage
+}
+
+public struct WebSearchResult: Equatable, Sendable {
+    public var title: String
+    public var url: URL
+    public var snippet: String?
+
+    public init(title: String, url: URL, snippet: String? = nil) {
+        self.title = title
+        self.url = url
+        self.snippet = snippet
+    }
+}
+
+@MainActor
+public protocol WebSearchProviding {
+    func search(query: String, limit: Int) async throws -> [WebSearchResult]
+}
+
+public struct UnavailableWebSearchProvider: WebSearchProviding {
+    public init() {}
+
+    public func search(query: String, limit: Int) async throws -> [WebSearchResult] {
+        throw WebResearchError.searchProviderNotConfigured
+    }
 }
 
 public struct PublicWebPageLoader {

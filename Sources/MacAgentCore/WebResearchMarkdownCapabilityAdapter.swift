@@ -43,13 +43,14 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
             AgentTool(
                 operation: .webToMarkdown,
                 name: "Web page to Markdown",
-                description: "Fetch one public http/https URL, or multiple http/https sourceURLs for comparison, synthesize a research note, and save Markdown in a whitelisted output path.",
-                requiredFields: ["targetURL or sourceURLs"],
+                description: "Fetch one public http/https URL, resolve a topic through a configured search provider, or fetch multiple http/https sourceURLs for comparison, synthesize a research note, and save Markdown in a whitelisted output path.",
+                requiredFields: ["targetURL, sourceURLs, or searchQuery"],
                 sideEffects: ["network request", "send fetched public page content to OpenAI", "write file"],
-                dryRunBehavior: "Show source URL(s) and Markdown output path without fetching pages or writing files.",
+                dryRunBehavior: "Show source URL(s), search query, and Markdown output path without fetching pages or writing files.",
                 examples: [
                     "Summarize https://example.com/article and save as Markdown",
-                    "Compare these source URLs and save a Markdown note"
+                    "Compare these source URLs and save a Markdown note",
+                    "Research Swift concurrency and save a Markdown note"
                 ]
             )
         ],
@@ -95,9 +96,8 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
         let spec = try webResearchSpec(in: plan, context: context)
         return [
             ActionPreview(
-                title: spec.sourceURLs.count == 1 ? "Save web article Markdown" : "Save web comparison Markdown",
-                details: [
-                    "Sources: \(spec.sourceURLs.map(\.absoluteString).joined(separator: ", "))",
+                title: previewTitle(for: spec.input),
+                details: previewDetails(for: spec.input) + [
                     "Save Markdown to \(spec.outputURL.path)"
                 ],
                 writes: [spec.outputURL.path]
@@ -131,9 +131,10 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
 
         let previews = try preview(plan: resolvedPlan, context: context)
         let spec = try webResearchSpec(in: resolvedPlan, context: context)
+        let sourceURLs = try await sourceURLs(for: spec, context: context, log: log)
 
         var pages: [ReadableWebPage] = []
-        for sourceURL in spec.sourceURLs {
+        for sourceURL in sourceURLs {
             log(.act, "Fetching \(sourceURL.absoluteString)")
             let page = try await context.webPageLoader.load(rawURL: sourceURL.absoluteString)
             log(.observe, "Extracted readable content from \(page.sourceURL.absoluteString)")
@@ -151,9 +152,7 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
         try Data(markdown.utf8).write(to: spec.outputURL, options: .atomic)
         log(.summarize, "Saved web research Markdown")
 
-        let summary = spec.sourceURLs.count == 1
-            ? "Saved web research Markdown to \(spec.outputURL.path)."
-            : "Saved comparison Markdown for \(spec.sourceURLs.count) sources to \(spec.outputURL.path)."
+        let summary = summary(for: spec, sourceCount: sourceURLs.count)
         return AgentRunResult(
             plan: resolvedPlan,
             previews: previews,
@@ -163,9 +162,14 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
     }
 
     private struct WebResearchSpec {
-        var sourceURLs: [URL]
+        var input: WebResearchInput
         var outputURL: URL
         var instruction: String
+    }
+
+    private enum WebResearchInput {
+        case urls([URL])
+        case search(query: String, limit: Int)
     }
 
     private static let hackerNewsURL = URL(string: "https://news.ycombinator.com")!
@@ -215,14 +219,13 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
             throw AgentExecutionError.invalidPlan("web_to_markdown step is missing.")
         }
 
-        let sourceURLStrings = try sourceStrings(in: step)
-        let sourceURLs = try sourceURLStrings.map { try SafeURL.validateWebURL($0) }
+        let input = try webResearchInput(in: step)
         let outputURL = try outputURL(for: step.outputPath, context: context)
         let instruction = [plan.summary, step.description]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty } ?? "Create a concise Markdown research note from the supplied web source(s)."
 
-        return WebResearchSpec(sourceURLs: sourceURLs, outputURL: outputURL, instruction: instruction)
+        return WebResearchSpec(input: input, outputURL: outputURL, instruction: instruction)
     }
 
     private func hackerNewsSpec(in plan: AgentPlan, context: CapabilityExecutionContext) throws -> HackerNewsSpec {
@@ -254,20 +257,89 @@ public struct WebResearchMarkdownCapabilityAdapter: CapabilityAdapter {
         return HackerNewsSpec(count: count, outputURL: outputURL)
     }
 
-    private func sourceStrings(in step: AgentStep) throws -> [String] {
+    private func webResearchInput(in step: AgentStep) throws -> WebResearchInput {
         let fromList = (step.sourceURLs ?? [])
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !fromList.isEmpty {
-            return fromList
+            return .urls(try fromList.map { try SafeURL.validateWebURL($0) })
         }
 
         if let targetURL = step.targetURL?.trimmingCharacters(in: .whitespacesAndNewlines),
            !targetURL.isEmpty {
-            return [targetURL]
+            return .urls([try SafeURL.validateWebURL(targetURL)])
         }
 
-        throw AgentExecutionError.invalidPlan("web_to_markdown needs targetURL or sourceURLs.")
+        if let searchQuery = step.searchQuery?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !searchQuery.isEmpty {
+            return .search(query: searchQuery, limit: max(step.count ?? 3, 1))
+        }
+
+        throw AgentExecutionError.invalidPlan("web_to_markdown needs targetURL, sourceURLs, or searchQuery.")
+    }
+
+    @MainActor
+    private func sourceURLs(
+        for spec: WebResearchSpec,
+        context: CapabilityExecutionContext,
+        log: @escaping (AgentPhase, String) -> Void
+    ) async throws -> [URL] {
+        switch spec.input {
+        case .urls(let sourceURLs):
+            return sourceURLs
+        case .search(let query, let limit):
+            log(.act, "Searching web for \(query)")
+            let results = try await context.webSearchProvider.search(query: query, limit: limit)
+            let urls = try uniqueURLs(results.map { result in
+                try SafeURL.validateWebURL(result.url.absoluteString)
+            })
+            guard !urls.isEmpty else {
+                throw WebResearchError.noSearchResults(query)
+            }
+            log(.observe, "Resolved \(urls.count) search result source(s)")
+            return urls
+        }
+    }
+
+    private func previewTitle(for input: WebResearchInput) -> String {
+        switch input {
+        case .urls(let sourceURLs):
+            return sourceURLs.count == 1 ? "Save web article Markdown" : "Save web comparison Markdown"
+        case .search:
+            return "Save web research Markdown"
+        }
+    }
+
+    private func previewDetails(for input: WebResearchInput) -> [String] {
+        switch input {
+        case .urls(let sourceURLs):
+            return ["Sources: \(sourceURLs.map(\.absoluteString).joined(separator: ", "))"]
+        case .search(let query, let limit):
+            return [
+                "Search query: \(query)",
+                "Search result limit: \(limit)"
+            ]
+        }
+    }
+
+    private func summary(for spec: WebResearchSpec, sourceCount: Int) -> String {
+        switch spec.input {
+        case .urls:
+            return sourceCount == 1
+                ? "Saved web research Markdown to \(spec.outputURL.path)."
+                : "Saved comparison Markdown for \(sourceCount) sources to \(spec.outputURL.path)."
+        case .search(let query, _):
+            return "Saved web research Markdown for search query \"\(query)\" using \(sourceCount) sources to \(spec.outputURL.path)."
+        }
+    }
+
+    private func uniqueURLs(_ urls: [URL]) -> [URL] {
+        var seen: Set<String> = []
+        var result: [URL] = []
+        for url in urls where seen.insert(url.absoluteString).inserted {
+            result.append(url)
+        }
+        return result
     }
 
     private func outputURL(for rawOutput: String?, context: CapabilityExecutionContext) throws -> URL {

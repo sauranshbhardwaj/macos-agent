@@ -297,6 +297,76 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func webResearchSearchQueryUsesInjectedProviderAndWritesMarkdown() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("search-note.md")
+        let first = URL(string: "https://example.com/swift-one")!
+        let second = URL(string: "https://example.com/swift-two")!
+        let searchProvider = StaticWebSearchProvider(results: [
+            WebSearchResult(title: "Swift One", url: first, snippet: "First snippet"),
+            WebSearchResult(title: "Swift Two", url: second, snippet: "Second snippet")
+        ])
+        let pageLoader = webPageLoader(pages: [
+            first.absoluteString: readablePage(url: first, title: "Swift One"),
+            second.absoluteString: readablePage(url: second, title: "Swift Two")
+        ])
+        let synthesizer = StaticWebResearchSynthesizer(
+            note: WebResearchNote(
+                title: "Swift Concurrency Research",
+                summary: "Search-backed research summary.",
+                keyPoints: ["Search point"],
+                citations: [],
+                sources: []
+            )
+        )
+        let executor = makeExecutor(
+            root: root,
+            webPageLoader: pageLoader,
+            webSearchProvider: searchProvider,
+            webResearchSynthesizer: synthesizer
+        )
+        let plan = webSearchPlan(query: "Swift concurrency", output: output, count: 2)
+
+        let preview = try executor.preview(plan: plan)
+        #expect(preview.first?.title == "Save web research Markdown")
+        #expect(preview.first?.details.contains("Search query: Swift concurrency") == true)
+        #expect(preview.first?.writes == [output.path])
+
+        let result = try await executor.execute(plan: plan) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(searchProvider.queries == ["Swift concurrency"])
+        #expect(searchProvider.limits == [2])
+        #expect(markdown.contains("# Swift Concurrency Research"))
+        #expect(markdown.contains("- [Swift One](https://example.com/swift-one)"))
+        #expect(markdown.contains("- [Swift Two](https://example.com/swift-two)"))
+        #expect(synthesizer.prompts[0].trustedPlan.steps[0].searchQuery == "Swift concurrency")
+        #expect(result.summary == "Saved web research Markdown for search query \"Swift concurrency\" using 2 sources to \(output.path).")
+    }
+
+    @Test
+    func webResearchSearchWithoutConfiguredProviderFailsClearly() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("search-note.md")
+        let executor = makeExecutor(
+            root: root,
+            webResearchSynthesizer: StaticWebResearchSynthesizer(
+                note: WebResearchNote(title: "Unused", summary: "Unused", keyPoints: [], citations: [], sources: [])
+            )
+        )
+        let plan = webSearchPlan(query: "unconfigured provider", output: output)
+
+        let preview = try executor.preview(plan: plan)
+        #expect(preview.first?.details.contains("Search query: unconfigured provider") == true)
+        await #expect(throws: WebResearchError.searchProviderNotConfigured) {
+            try await executor.execute(plan: plan) { _, _ in }
+        }
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+    }
+
+    @Test
     func openAppPreviewUsesAllowlist() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -749,6 +819,7 @@ struct AgentActionExecutorTests {
         routineStore: RoutineStore? = nil,
         workspaceStore: WorkspaceStore? = nil,
         webPageLoader: PublicWebPageLoader? = nil,
+        webSearchProvider: (any WebSearchProviding)? = nil,
         webResearchSynthesizer: (any WebResearchSynthesizing)? = nil
     ) -> AgentActionExecutor {
         AgentActionExecutor(
@@ -764,6 +835,7 @@ struct AgentActionExecutorTests {
             routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
             workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json")),
             webPageLoader: webPageLoader,
+            webSearchProvider: webSearchProvider,
             webResearchSynthesizer: webResearchSynthesizer
         )
     }
@@ -869,6 +941,23 @@ struct AgentActionExecutorTests {
                     description: "Compare source URLs.",
                     outputPath: output.path,
                     sourceURLs: urls.map(\.absoluteString)
+                )
+            ]
+        )
+    }
+
+    private func webSearchPlan(query: String, output: URL, count: Int? = nil) -> AgentPlan {
+        AgentPlan(
+            summary: "Research a topic as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web-search",
+                    operation: .webToMarkdown,
+                    description: "Research topic.",
+                    outputPath: output.path,
+                    count: count,
+                    searchQuery: query
                 )
             ]
         )
@@ -1120,5 +1209,22 @@ private final class StaticWebResearchSynthesizer: WebResearchSynthesizing {
     func synthesize(prompt: WebResearchSynthesisPrompt) async throws -> WebResearchNote {
         prompts.append(prompt)
         return note
+    }
+}
+
+@MainActor
+private final class StaticWebSearchProvider: WebSearchProviding {
+    var results: [WebSearchResult]
+    private(set) var queries: [String] = []
+    private(set) var limits: [Int] = []
+
+    init(results: [WebSearchResult]) {
+        self.results = results
+    }
+
+    func search(query: String, limit: Int) async throws -> [WebSearchResult] {
+        queries.append(query)
+        limits.append(limit)
+        return Array(results.prefix(max(limit, 0)))
     }
 }

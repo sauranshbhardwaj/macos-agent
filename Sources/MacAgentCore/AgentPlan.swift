@@ -32,6 +32,7 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var workspaceApps: [String]?
     public var workspaceURLs: [String]?
     public var sourceURLs: [String]?
+    public var searchQuery: String?
 
     public init(
         id: String,
@@ -52,7 +53,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         workspaceName: String? = nil,
         workspaceApps: [String]? = nil,
         workspaceURLs: [String]? = nil,
-        sourceURLs: [String]? = nil
+        sourceURLs: [String]? = nil,
+        searchQuery: String? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -73,6 +75,7 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.workspaceApps = workspaceApps
         self.workspaceURLs = workspaceURLs
         self.sourceURLs = sourceURLs
+        self.searchQuery = searchQuery
     }
 }
 
@@ -159,7 +162,8 @@ public enum AgentPlanDecoder {
         "workspaceName",
         "workspaceApps",
         "workspaceURLs",
-        "sourceURLs"
+        "sourceURLs",
+        "searchQuery"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -225,7 +229,8 @@ public enum AgentPlanSchema {
         "workspaceName",
         "workspaceApps",
         "workspaceURLs",
-        "sourceURLs"
+        "sourceURLs",
+        "searchQuery"
     ]
 
     public static func responseFormat() -> [String: Any] {
@@ -349,6 +354,10 @@ public enum AgentPlanSchema {
                 "type": ["array", "null"],
                 "description": "HTTP/HTTPS source URLs for web_to_markdown comparison notes, or null.",
                 "items": ["type": "string"]
+            ],
+            "searchQuery": [
+                "type": ["string", "null"],
+                "description": "Topic or web search query for web_to_markdown research notes, or null."
             ]
         ]
     }

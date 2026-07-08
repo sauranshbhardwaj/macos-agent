@@ -58,6 +58,7 @@ public final class AgentActionExecutor {
     private let routineStore: RoutineStore
     private let workspaceStore: WorkspaceStore
     private let webPageLoader: PublicWebPageLoader
+    private let webSearchProvider: any WebSearchProviding
     private let webResearchSynthesizer: any WebResearchSynthesizing
     private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
@@ -78,6 +79,7 @@ public final class AgentActionExecutor {
         routineStore: RoutineStore = RoutineStore(),
         workspaceStore: WorkspaceStore = WorkspaceStore(),
         webPageLoader: PublicWebPageLoader? = nil,
+        webSearchProvider: (any WebSearchProviding)? = nil,
         webResearchSynthesizer: (any WebResearchSynthesizing)? = nil,
         capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
@@ -97,6 +99,7 @@ public final class AgentActionExecutor {
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
         self.webPageLoader = webPageLoader ?? PublicWebPageLoader.live()
+        self.webSearchProvider = webSearchProvider ?? UnavailableWebSearchProvider()
         self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer()
         self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
@@ -452,6 +455,7 @@ public final class AgentActionExecutor {
             if let sourceURLs = step.sourceURLs {
                 resources.append(contentsOf: sourceURLs)
             }
+            appendIfPresent(step.searchQuery.map { "Search: \($0)" }, to: &resources)
             appendIfPresent(step.outputPath, to: &resources)
             appendIfPresent(step.inputPath, to: &resources)
             appendIfPresent(step.routineName.map { "Routine: \($0)" }, to: &resources)
@@ -534,6 +538,7 @@ public final class AgentActionExecutor {
             routineStore: routineStore,
             workspaceStore: workspaceStore,
             webPageLoader: webPageLoader,
+            webSearchProvider: webSearchProvider,
             webResearchSynthesizer: webResearchSynthesizer,
             fileManager: fileManager,
             now: now,

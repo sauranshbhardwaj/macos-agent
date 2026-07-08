@@ -28,6 +28,7 @@ struct PlannerBoundaryTests {
         - For Hacker News headline saving, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
         - For summarizing one public web page to Markdown, produce one web_to_markdown step with targetURL and optional outputPath.
         - For comparing multiple public web sources to Markdown, produce one web_to_markdown step with sourceURLs and optional outputPath.
+        - For researching a topic/search query to Markdown, produce one web_to_markdown step with searchQuery and optional outputPath.
         - For opening an app, produce one open_app step with appName.
         - For opening a general website, produce one open_url step with targetURL using http or https.
         - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
@@ -86,7 +87,8 @@ struct PlannerBoundaryTests {
             "workspaceName",
             "workspaceApps",
             "workspaceURLs",
-            "sourceURLs"
+            "sourceURLs",
+            "searchQuery"
         ])
 
         let stepProperties = try #require(stepItems["properties"] as? [String: Any])
@@ -147,11 +149,11 @@ private let expectedDefaultPlannerDescription = """
   dry run: Show the Markdown path without writing it.
   examples: Save to a Markdown file
 - web_to_markdown: Web page to Markdown
-  description: Fetch one public http/https URL, or multiple http/https sourceURLs for comparison, synthesize a research note, and save Markdown in a whitelisted output path.
-  required fields: targetURL or sourceURLs
+  description: Fetch one public http/https URL, resolve a topic through a configured search provider, or fetch multiple http/https sourceURLs for comparison, synthesize a research note, and save Markdown in a whitelisted output path.
+  required fields: targetURL, sourceURLs, or searchQuery
   side effects: network request, send fetched public page content to OpenAI, write file
-  dry run: Show source URL(s) and Markdown output path without fetching pages or writing files.
-  examples: Summarize https://example.com/article and save as Markdown | Compare these source URLs and save a Markdown note
+  dry run: Show source URL(s), search query, and Markdown output path without fetching pages or writing files.
+  examples: Summarize https://example.com/article and save as Markdown | Compare these source URLs and save a Markdown note | Research Swift concurrency and save a Markdown note
 - open_app: Open allowlisted Mac app
   description: Open an app from the local allowlist by human app name. Supported apps: Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Apple Music, Spotify, Slack, VS Code, Terminal.
   required fields: appName
