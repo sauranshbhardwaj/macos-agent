@@ -8,10 +8,10 @@ public struct OpenWorkspaceCapabilityAdapter: CapabilityAdapter {
     }
 
     public static let metadata = CapabilityMetadata(
-        id: "local.workspaces.open",
-        displayName: "Open saved workspace",
-        description: "Open every allowlisted app and safe URL saved in a named workspace.",
-        operations: [.openWorkspace],
+        id: descriptor.capabilityID,
+        displayName: descriptor.displayName,
+        description: descriptor.description,
+        operations: descriptor.supportedActions,
         plannerTools: [
             AgentTool(
                 operation: .openWorkspace,
@@ -23,12 +23,11 @@ public struct OpenWorkspaceCapabilityAdapter: CapabilityAdapter {
                 examples: ["Open my research workspace", "Start research mode"]
             )
         ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .appOpening),
-            CapabilityPermissionMetadata(requirement: .browserOpening)
-        ],
-        defaultRiskTier: .tier1
+        requiredPermissions: descriptor.requiredPermissions,
+        defaultRiskTier: descriptor.defaultRiskTier
     )
+
+    public static let descriptor = AppWebsiteActionDescriptors.openWorkspace
 
     public func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview] {
         let workspace = try workspaceRunSpec(plan, context: context)

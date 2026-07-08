@@ -122,12 +122,17 @@ public struct CapabilityExecutionContext {
     public var browserOpener: any BrowserOpening
     public var hackerNewsFetcher: any HackerNewsFetching
     public var appCatalog: MacAppCatalog
+    public var appSearchURLCatalog: AppSearchURLCatalog
     public var appOpener: any AppOpening
+    public var fileOpener: any FileOpening
     public var mediaOpener: any MediaOpening
     public var finderContextReader: any FinderContextReading
     public var permissionReadinessService: PermissionReadinessService
     public var routineStore: RoutineStore
     public var workspaceStore: WorkspaceStore
+    public var webPageLoader: PublicWebPageLoader
+    public var webSearchProvider: any WebSearchProviding
+    public var webResearchSynthesizer: any WebResearchSynthesizing
     public var fileManager: FileManager
     public var now: () -> Date
     public var assessNestedPlan: AssessNestedPlan
@@ -142,12 +147,17 @@ public struct CapabilityExecutionContext {
         browserOpener: any BrowserOpening,
         hackerNewsFetcher: any HackerNewsFetching,
         appCatalog: MacAppCatalog,
+        appSearchURLCatalog: AppSearchURLCatalog,
         appOpener: any AppOpening,
+        fileOpener: any FileOpening,
         mediaOpener: any MediaOpening,
         finderContextReader: any FinderContextReading,
         permissionReadinessService: PermissionReadinessService,
         routineStore: RoutineStore,
         workspaceStore: WorkspaceStore,
+        webPageLoader: PublicWebPageLoader,
+        webSearchProvider: any WebSearchProviding,
+        webResearchSynthesizer: any WebResearchSynthesizing,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
         assessNestedPlan: @escaping AssessNestedPlan,
@@ -161,12 +171,17 @@ public struct CapabilityExecutionContext {
         self.browserOpener = browserOpener
         self.hackerNewsFetcher = hackerNewsFetcher
         self.appCatalog = appCatalog
+        self.appSearchURLCatalog = appSearchURLCatalog
         self.appOpener = appOpener
+        self.fileOpener = fileOpener
         self.mediaOpener = mediaOpener
         self.finderContextReader = finderContextReader
         self.permissionReadinessService = permissionReadinessService
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
+        self.webPageLoader = webPageLoader
+        self.webSearchProvider = webSearchProvider
+        self.webResearchSynthesizer = webResearchSynthesizer
         self.fileManager = fileManager
         self.now = now
         self.assessNestedPlan = assessNestedPlan

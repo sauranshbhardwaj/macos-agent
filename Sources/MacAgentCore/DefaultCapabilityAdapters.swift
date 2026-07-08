@@ -5,9 +5,12 @@ public enum DefaultCapabilityAdapters {
         [
             LargestFilesZipCapabilityAdapter(),
             DocxConversionCapabilityAdapter(),
-            HackerNewsMarkdownCapabilityAdapter(),
+            WebResearchMarkdownCapabilityAdapter(),
             OpenAllowlistedAppCapabilityAdapter(),
+            OpenAppSearchURLCapabilityAdapter(),
             OpenSafeURLCapabilityAdapter(),
+            OpenGeneratedArtifactCapabilityAdapter(),
+            CreateLocalDraftCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),
             FinderSelectionCapabilityAdapter(),
             RevealInFinderCapabilityAdapter(),

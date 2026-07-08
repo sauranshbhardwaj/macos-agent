@@ -11,9 +11,15 @@ let package = Package(
         .executable(name: "MacAgent", targets: ["MacAgent"]),
         .library(name: "MacAgentCore", targets: ["MacAgentCore"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.13.5")
+    ],
     targets: [
         .target(
             name: "MacAgentCore",
+            dependencies: [
+                .product(name: "SwiftSoup", package: "SwiftSoup")
+            ],
             path: "Sources/MacAgentCore"
         ),
         .executableTarget(

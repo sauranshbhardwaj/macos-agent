@@ -117,8 +117,14 @@ public final class OpenAIPlanner: Planning {
     - For largest files, produce scan_select_largest_files then create_zip.
     - For DOCX conversion, produce scan_docx then convert_docx_to_pdf.
     - For Hacker News headline saving, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
+    - For summarizing one public web page to Markdown, produce one web_to_markdown step with targetURL and optional outputPath.
+    - For comparing multiple public web sources to Markdown, produce one web_to_markdown step with sourceURLs and optional outputPath.
+    - For researching a topic/search query to Markdown, produce one web_to_markdown step with searchQuery and optional outputPath.
     - For opening an app, produce one open_app step with appName.
+    - For opening an allowlisted app or website search page, produce one open_app_search_url step with appName and searchQuery. Use only supported search targets; do not invent URL templates.
     - For opening a general website, produce one open_url step with targetURL using http or https.
+    - For creating a local draft, produce one create_local_draft step with draftTitle, draftContent, and optional outputPath. Do not automate Notes, Mail, Calendar, or any app UI.
+    - For opening a generated local artifact after a writing step, add open_generated_artifact with outputPath null so the executor can open the previous produced artifact.
     - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
     - If a song or album request is missing the provider or title, ask a clarification question.
     - For Finder context phrases such as "selected folder", "selected files", "this Finder selection", or "the folder selected in Finder", set contextSource to finder_selection and leave inputPath null.

@@ -52,6 +52,49 @@ struct AgentRunnerTests {
     }
 
     @Test
+    func appSearchURLTierOneAutoRunsWithoutApprovalDecision() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let browserOpener = RecordingBrowserOpener()
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: openAppSearchURLPlan()),
+            executor: makeExecutor(root: root, browserOpener: browserOpener)
+        )
+
+        let prepared = try await runner.prepare(command: "Search GitHub for Swift concurrency")
+        let request = try runner.approvalRequest(for: prepared)
+        let result = try await runner.execute(prepared)
+
+        #expect(request.assessment.effectiveTier == .tier1)
+        #expect(request.requirement == .autoRun)
+        #expect(request.approvalCopy.dataLeavesDevice == true)
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com/search?q=Swift%20concurrency"])
+        #expect(result.summary == "Opened GitHub search for Swift concurrency.")
+    }
+
+    @Test
+    func openGeneratedArtifactTierOneAutoRunsWithoutApprovalDecision() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let artifact = root.appendingPathComponent("artifact.md")
+        try write("artifact", to: artifact)
+        let fileOpener = RecordingFileOpener()
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: openGeneratedArtifactPlan(output: artifact)),
+            executor: makeExecutor(root: root, fileOpener: fileOpener)
+        )
+
+        let prepared = try await runner.prepare(command: "Open the generated artifact")
+        let request = try runner.approvalRequest(for: prepared)
+        let result = try await runner.execute(prepared)
+
+        #expect(request.assessment.effectiveTier == .tier1)
+        #expect(request.requirement == .autoRun)
+        #expect(fileOpener.openedFiles == [artifact.standardizedFileURL])
+        #expect(result.summary == "Opened generated artifact \(artifact.path).")
+    }
+
+    @Test
     func tierZeroCommandAutoRunsWithoutApprovalDecision() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -270,6 +313,70 @@ struct AgentRunnerTests {
         #expect(request.assessment.effectiveTier == .tier3)
         #expect(request.requirement == .explicitApproval)
         #expect(request.assessment.escalations.first?.reason == "Markdown output already exists at \(output.path).")
+    }
+
+    @Test
+    func existingWebResearchMarkdownOutputEscalatesAndMarksDataLeavingDevice() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("web.md")
+        try write("existing markdown", to: output)
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: webMarkdownPlan(output: output)),
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Summarize this article as Markdown")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.approvalCopy.dataLeavesDevice == true)
+        #expect(request.assessment.escalations.first?.reason == "Markdown output already exists at \(output.path).")
+    }
+
+    @Test
+    func existingWebSearchMarkdownOutputUsesWebResearchRiskPath() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("search.md")
+        try write("existing markdown", to: output)
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: webSearchPlan(output: output)),
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Research Swift concurrency as Markdown")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.approvalCopy.dataLeavesDevice == true)
+        #expect(request.approvalCopy.involvedResource.contains("Search: Swift concurrency"))
+        #expect(request.assessment.escalations.first?.reason == "Markdown output already exists at \(output.path).")
+    }
+
+    @Test
+    func existingLocalDraftOutputEscalatesToTierThree() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("draft.md")
+        try write("existing draft", to: output)
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: localDraftPlan(output: output)),
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Create a local draft")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.approvalCopy.dataLeavesDevice == false)
+        #expect(request.assessment.escalations.first?.reason == "Draft output already exists at \(output.path).")
     }
 
     @Test
@@ -572,6 +679,7 @@ struct AgentRunnerTests {
         documentConverter: DocumentConverting = FakeDocumentConverter(),
         browserOpener: BrowserOpening = NoopBrowserOpener(),
         appOpener: AppOpening = NoopAppOpener(),
+        fileOpener: FileOpening = NoopFileOpener(),
         mediaOpener: MediaOpening = FakeMediaOpener(),
         finderContextReader: FinderContextReading = FakeFinderContextReader(selection: []),
         routineStore: RoutineStore? = nil,
@@ -584,6 +692,7 @@ struct AgentRunnerTests {
             documentConverter: documentConverter,
             browserOpener: browserOpener,
             appOpener: appOpener,
+            fileOpener: fileOpener,
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
@@ -617,6 +726,37 @@ struct AgentRunnerTests {
                     operation: .openURL,
                     description: "Open \(url).",
                     targetURL: url
+                )
+            ]
+        )
+    }
+
+    private func openAppSearchURLPlan() -> AgentPlan {
+        AgentPlan(
+            summary: "Open GitHub search.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "search-url",
+                    operation: .openAppSearchURL,
+                    description: "Open GitHub search.",
+                    appName: "GitHub",
+                    searchQuery: "Swift concurrency"
+                )
+            ]
+        )
+    }
+
+    private func openGeneratedArtifactPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Open generated artifact.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-artifact",
+                    operation: .openGeneratedArtifact,
+                    description: "Open generated artifact.",
+                    outputPath: output.path
                 )
             ]
         )
@@ -670,6 +810,55 @@ struct AgentRunnerTests {
                     description: "Write Markdown.",
                     outputPath: output.path,
                     count: 5
+                )
+            ]
+        )
+    }
+
+    private func webMarkdownPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Summarize web article as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web",
+                    operation: .webToMarkdown,
+                    description: "Create web Markdown.",
+                    outputPath: output.path,
+                    targetURL: "https://example.com/article"
+                )
+            ]
+        )
+    }
+
+    private func webSearchPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Research Swift concurrency as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web-search",
+                    operation: .webToMarkdown,
+                    description: "Research Swift concurrency.",
+                    outputPath: output.path,
+                    searchQuery: "Swift concurrency"
+                )
+            ]
+        )
+    }
+
+    private func localDraftPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Create local draft.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "draft",
+                    operation: .createLocalDraft,
+                    description: "Create draft.",
+                    outputPath: output.path,
+                    draftTitle: "Follow Up",
+                    draftContent: "Draft body."
                 )
             ]
         )
@@ -897,6 +1086,10 @@ private struct NoopAppOpener: AppOpening {
     func open(bundleIdentifier: String) async throws {}
 }
 
+private struct NoopFileOpener: FileOpening {
+    func openFile(_ url: URL) async throws {}
+}
+
 private struct FakeDocumentConverter: DocumentConverting {
     var isAvailable: Bool { true }
     var modeName: String { "Fake converter" }
@@ -912,6 +1105,15 @@ private final class RecordingAppOpener: AppOpening {
 
     func open(bundleIdentifier: String) async throws {
         openedBundleIDs.append(bundleIdentifier)
+    }
+}
+
+@MainActor
+private final class RecordingFileOpener: FileOpening {
+    private(set) var openedFiles: [URL] = []
+
+    func openFile(_ url: URL) async throws {
+        openedFiles.append(url.standardizedFileURL)
     }
 }
 

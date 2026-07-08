@@ -26,8 +26,14 @@ struct PlannerBoundaryTests {
         - For largest files, produce scan_select_largest_files then create_zip.
         - For DOCX conversion, produce scan_docx then convert_docx_to_pdf.
         - For Hacker News headline saving, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
+        - For summarizing one public web page to Markdown, produce one web_to_markdown step with targetURL and optional outputPath.
+        - For comparing multiple public web sources to Markdown, produce one web_to_markdown step with sourceURLs and optional outputPath.
+        - For researching a topic/search query to Markdown, produce one web_to_markdown step with searchQuery and optional outputPath.
         - For opening an app, produce one open_app step with appName.
+        - For opening an allowlisted app or website search page, produce one open_app_search_url step with appName and searchQuery. Use only supported search targets; do not invent URL templates.
         - For opening a general website, produce one open_url step with targetURL using http or https.
+        - For creating a local draft, produce one create_local_draft step with draftTitle, draftContent, and optional outputPath. Do not automate Notes, Mail, Calendar, or any app UI.
+        - For opening a generated local artifact after a writing step, add open_generated_artifact with outputPath null so the executor can open the previous produced artifact.
         - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
         - If a song or album request is missing the provider or title, ask a clarification question.
         - For Finder context phrases such as "selected folder", "selected files", "this Finder selection", or "the folder selected in Finder", set contextSource to finder_selection and leave inputPath null.
@@ -83,7 +89,11 @@ struct PlannerBoundaryTests {
             "routineSteps",
             "workspaceName",
             "workspaceApps",
-            "workspaceURLs"
+            "workspaceURLs",
+            "sourceURLs",
+            "searchQuery",
+            "draftTitle",
+            "draftContent"
         ])
 
         let stepProperties = try #require(stepItems["properties"] as? [String: Any])
@@ -143,18 +153,42 @@ private let expectedDefaultPlannerDescription = """
   side effects: write file
   dry run: Show the Markdown path without writing it.
   examples: Save to a Markdown file
+- web_to_markdown: Web page to Markdown
+  description: Fetch one public http/https URL, resolve a topic through a configured search provider, or fetch multiple http/https sourceURLs for comparison, synthesize a research note, and save Markdown in a whitelisted output path.
+  required fields: targetURL, sourceURLs, or searchQuery
+  side effects: network request, send fetched public page content to OpenAI, write file
+  dry run: Show source URL(s), search query, and Markdown output path without fetching pages or writing files.
+  examples: Summarize https://example.com/article and save as Markdown | Compare these source URLs and save a Markdown note | Research Swift concurrency and save a Markdown note
 - open_app: Open allowlisted Mac app
   description: Open an app from the local allowlist by human app name. Supported apps: Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Apple Music, Spotify, Slack, VS Code, Terminal.
   required fields: appName
   side effects: open app
   dry run: Show the allowlisted app that would open.
   examples: Open Safari | Open Spotify | Launch Apple Music
+- open_app_search_url: Open allowlisted search URL
+  description: Open a fixed allowlisted app or website search URL template. Supported search targets: Google, GitHub, YouTube, Apple Music, Spotify.
+  required fields: appName, searchQuery
+  side effects: open browser
+  dry run: Show the fixed search URL template result without opening it.
+  examples: Search GitHub for Swift concurrency | Search YouTube for Sonny demos
 - open_url: Open web URL
   description: Open a safe http or https URL in the default browser.
   required fields: targetURL
   side effects: open browser
   dry run: Show the URL that would open.
   examples: Open GitHub | Open https://gmail.com
+- open_generated_artifact: Open generated artifact
+  description: Open a specific whitelisted generated file, or open the most recent file produced earlier in the same chain when outputPath is null.
+  required fields: none
+  side effects: open file
+  dry run: Show the file that would open.
+  examples: Open the generated Markdown | Open the result
+- create_local_draft: Create local draft
+  description: Create a local Markdown draft artifact in a whitelisted output path. This does not automate Notes, Mail, Calendar, or any other app UI.
+  required fields: draftContent
+  side effects: write file
+  dry run: Show the draft file path without writing it.
+  examples: Create a local draft called Follow-up with this text
 - play_media: Open music result
   description: Open a requested song or album in Apple Music or Spotify without starting playback. Apple Music opens the best matching catalog album result when found, otherwise search. Spotify opens a supplied Spotify result URI or a Spotify search.
   required fields: mediaProvider, mediaTitle

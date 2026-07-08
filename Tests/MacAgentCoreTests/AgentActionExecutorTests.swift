@@ -204,6 +204,169 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func webResearchExecutionWritesMarkdownWithSourcesAndSuggestions() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("web-note.md")
+        let source = URL(string: "https://example.com/article")!
+        let retrievedAt = Date(timeIntervalSince1970: 1_783_526_400)
+        let pageLoader = webPageLoader(pages: [
+            source.absoluteString: readablePage(
+                url: source,
+                retrievedAt: retrievedAt,
+                title: "Article One"
+            )
+        ])
+        let synthesizer = StaticWebResearchSynthesizer(
+            note: WebResearchNote(
+                title: "Article One Notes",
+                summary: "A concise summary.",
+                keyPoints: ["First point"],
+                citations: ["Article One citation"],
+                sources: [
+                    WebResearchNoteSource(
+                        title: "Article One",
+                        url: source.absoluteString,
+                        retrievedAt: ISO8601DateFormatter().string(from: retrievedAt)
+                    )
+                ]
+            )
+        )
+        let executor = makeExecutor(
+            root: root,
+            webPageLoader: pageLoader,
+            webResearchSynthesizer: synthesizer
+        )
+
+        let result = try await executor.execute(plan: webMarkdownPlan(url: source, output: output)) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(markdown.contains("# Article One Notes"))
+        #expect(markdown.contains("Generated:"))
+        #expect(markdown.contains("- [Article One](https://example.com/article)"))
+        #expect(markdown.contains("Retrieved: 2026-07-08T16:00:00Z"))
+        #expect(markdown.contains("A concise summary."))
+        #expect(synthesizer.prompts.count == 1)
+        #expect(synthesizer.prompts[0].trustedPlan.steps.map(\.operation) == [.webToMarkdown])
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Open Markdown" &&
+                suggestion.kind == .openFile &&
+                suggestion.value == output.path
+        })
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Reveal Markdown in Finder" &&
+                suggestion.kind == .revealInFinder &&
+                suggestion.value == output.path
+        })
+    }
+
+    @Test
+    func webResearchCanWriteComparisonMarkdownForMultipleSources() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("comparison.md")
+        let first = URL(string: "https://example.com/one")!
+        let second = URL(string: "https://example.com/two")!
+        let pageLoader = webPageLoader(pages: [
+            first.absoluteString: readablePage(url: first, title: "First Source"),
+            second.absoluteString: readablePage(url: second, title: "Second Source")
+        ])
+        let executor = makeExecutor(
+            root: root,
+            webPageLoader: pageLoader,
+            webResearchSynthesizer: StaticWebResearchSynthesizer(
+                note: WebResearchNote(
+                    title: "Comparison",
+                    summary: "The sources differ.",
+                    keyPoints: ["Compare point"],
+                    citations: [],
+                    sources: []
+                )
+            )
+        )
+
+        let result = try await executor.execute(
+            plan: webComparisonPlan(urls: [first, second], output: output)
+        ) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(markdown.contains("# Comparison"))
+        #expect(markdown.contains("- [First Source](https://example.com/one)"))
+        #expect(markdown.contains("- [Second Source](https://example.com/two)"))
+        #expect(result.summary == "Saved comparison Markdown for 2 sources to \(output.path).")
+    }
+
+    @Test
+    func webResearchSearchQueryUsesInjectedProviderAndWritesMarkdown() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("search-note.md")
+        let first = URL(string: "https://example.com/swift-one")!
+        let second = URL(string: "https://example.com/swift-two")!
+        let searchProvider = StaticWebSearchProvider(results: [
+            WebSearchResult(title: "Swift One", url: first, snippet: "First snippet"),
+            WebSearchResult(title: "Swift Two", url: second, snippet: "Second snippet")
+        ])
+        let pageLoader = webPageLoader(pages: [
+            first.absoluteString: readablePage(url: first, title: "Swift One"),
+            second.absoluteString: readablePage(url: second, title: "Swift Two")
+        ])
+        let synthesizer = StaticWebResearchSynthesizer(
+            note: WebResearchNote(
+                title: "Swift Concurrency Research",
+                summary: "Search-backed research summary.",
+                keyPoints: ["Search point"],
+                citations: [],
+                sources: []
+            )
+        )
+        let executor = makeExecutor(
+            root: root,
+            webPageLoader: pageLoader,
+            webSearchProvider: searchProvider,
+            webResearchSynthesizer: synthesizer
+        )
+        let plan = webSearchPlan(query: "Swift concurrency", output: output, count: 2)
+
+        let preview = try executor.preview(plan: plan)
+        #expect(preview.first?.title == "Save web research Markdown")
+        #expect(preview.first?.details.contains("Search query: Swift concurrency") == true)
+        #expect(preview.first?.writes == [output.path])
+
+        let result = try await executor.execute(plan: plan) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(searchProvider.queries == ["Swift concurrency"])
+        #expect(searchProvider.limits == [2])
+        #expect(markdown.contains("# Swift Concurrency Research"))
+        #expect(markdown.contains("- [Swift One](https://example.com/swift-one)"))
+        #expect(markdown.contains("- [Swift Two](https://example.com/swift-two)"))
+        #expect(synthesizer.prompts[0].trustedPlan.steps[0].searchQuery == "Swift concurrency")
+        #expect(result.summary == "Saved web research Markdown for search query \"Swift concurrency\" using 2 sources to \(output.path).")
+    }
+
+    @Test
+    func webResearchSearchWithoutConfiguredProviderFailsClearly() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("search-note.md")
+        let executor = makeExecutor(
+            root: root,
+            webResearchSynthesizer: StaticWebResearchSynthesizer(
+                note: WebResearchNote(title: "Unused", summary: "Unused", keyPoints: [], citations: [], sources: [])
+            )
+        )
+        let plan = webSearchPlan(query: "unconfigured provider", output: output)
+
+        let preview = try executor.preview(plan: plan)
+        #expect(preview.first?.details.contains("Search query: unconfigured provider") == true)
+        await #expect(throws: WebResearchError.searchProviderNotConfigured) {
+            try await executor.execute(plan: plan) { _, _ in }
+        }
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+    }
+
+    @Test
     func openAppPreviewUsesAllowlist() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -250,6 +413,27 @@ struct AgentActionExecutorTests {
         #expect(preview.first?.opens == ["https://github.com"])
         #expect(throws: SafeURLError.unsupportedScheme("ftp")) {
             try executor.preview(plan: openURLPlan(url: "ftp://example.com"))
+        }
+    }
+
+    @Test
+    func openAppSearchURLUsesFixedAllowlistedTemplatesOnly() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(root: root, browserOpener: browserOpener)
+
+        let preview = try executor.preview(plan: openAppSearchURLPlan(target: "GitHub", query: "Swift concurrency"))
+
+        #expect(preview.first?.title == "Open GitHub search")
+        #expect(preview.first?.opens.first == "https://github.com/search?q=Swift%20concurrency")
+        #expect(preview.first?.details.contains("Allowed search targets: Google, GitHub, YouTube, Apple Music, Spotify") == true)
+        let result = try await executor.execute(plan: openAppSearchURLPlan(target: "GitHub", query: "Swift concurrency")) { _, _ in }
+
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com/search?q=Swift%20concurrency"])
+        #expect(result.summary == "Opened GitHub search for Swift concurrency.")
+        #expect(throws: AppSearchURLCatalogError.searchTargetNotAllowed("Untrusted")) {
+            try executor.preview(plan: openAppSearchURLPlan(target: "Untrusted", query: "Swift"))
         }
     }
 
@@ -643,6 +827,78 @@ struct AgentActionExecutorTests {
         #expect(result.summary == "Opened workspace Research with 1 app(s) and 1 URL(s).")
     }
 
+    @Test
+    func createLocalDraftWritesWhitelistedMarkdownAndSuggestsOpenReveal() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("draft.md")
+        let executor = makeExecutor(root: root)
+
+        let result = try await executor.execute(plan: localDraftPlan(output: output)) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(markdown.contains("# Follow Up"))
+        #expect(markdown.contains("Draft body."))
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Open Draft" &&
+                suggestion.kind == .openFile &&
+                suggestion.value == output.path
+        })
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Reveal Draft in Finder" &&
+                suggestion.kind == .revealInFinder &&
+                suggestion.value == output.path
+        })
+    }
+
+    @Test
+    func openGeneratedArtifactUsesInjectedFileOpenerAndRejectsOutsideWhitelist() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let artifact = root.appendingPathComponent("artifact.md")
+        try write("artifact", to: artifact)
+        let fileOpener = RecordingFileOpener()
+        let executor = makeExecutor(root: root, fileOpener: fileOpener)
+
+        let result = try await executor.execute(plan: openGeneratedArtifactPlan(output: artifact)) { _, _ in }
+
+        #expect(fileOpener.openedFiles == [artifact.standardizedFileURL])
+        #expect(result.summary == "Opened generated artifact \(artifact.path).")
+        #expect(throws: PathValidationError.outsideWhitelist("/private/tmp/not-allowed.md", [root.path])) {
+            try executor.preview(plan: openGeneratedArtifactPlan(output: URL(fileURLWithPath: "/private/tmp/not-allowed.md")))
+        }
+    }
+
+    @Test
+    func chainCanOpenFutureGeneratedArtifact() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("draft.md")
+        let fileOpener = RecordingFileOpener()
+        let executor = makeExecutor(root: root, fileOpener: fileOpener)
+        let plan = AgentPlan(
+            summary: "Create and open draft.",
+            requiresConfirmation: true,
+            steps: [
+                localDraftStep(output: output),
+                AgentStep(
+                    id: "open-artifact",
+                    operation: .openGeneratedArtifact,
+                    description: "Open generated draft."
+                )
+            ]
+        )
+
+        let preview = try executor.preview(plan: plan)
+        let result = try await executor.execute(plan: plan) { _, _ in }
+
+        #expect(preview.count == 2)
+        #expect(preview[1].details == ["Open \(output.path)"])
+        #expect(fileOpener.openedFiles == [output.standardizedFileURL])
+        #expect(result.summary.contains("Created local draft"))
+        #expect(result.summary.contains("Opened generated artifact"))
+    }
+
     private func makeExecutor(
         root: URL,
         zipArchiver: ZipArchiving = RecordingZipArchiver(),
@@ -650,11 +906,16 @@ struct AgentActionExecutorTests {
         browserOpener: BrowserOpening = NoopBrowserOpener(),
         hackerNewsFetcher: HackerNewsFetching = StaticHackerNewsFetcher(),
         appCatalog: MacAppCatalog = .default,
+        appSearchURLCatalog: AppSearchURLCatalog = .default,
         appOpener: AppOpening = NoopAppOpener(),
+        fileOpener: FileOpening = NoopFileOpener(),
         mediaOpener: MediaOpening = FakeMediaOpener(),
         finderContextReader: FinderContextReading = FakeFinderContextReader(selection: []),
         routineStore: RoutineStore? = nil,
-        workspaceStore: WorkspaceStore? = nil
+        workspaceStore: WorkspaceStore? = nil,
+        webPageLoader: PublicWebPageLoader? = nil,
+        webSearchProvider: (any WebSearchProviding)? = nil,
+        webResearchSynthesizer: (any WebResearchSynthesizing)? = nil
     ) -> AgentActionExecutor {
         AgentActionExecutor(
             whitelist: PathWhitelist(roots: [root]),
@@ -663,11 +924,16 @@ struct AgentActionExecutorTests {
             browserOpener: browserOpener,
             hackerNewsFetcher: hackerNewsFetcher,
             appCatalog: appCatalog,
+            appSearchURLCatalog: appSearchURLCatalog,
             appOpener: appOpener,
+            fileOpener: fileOpener,
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
-            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json")),
+            webPageLoader: webPageLoader,
+            webSearchProvider: webSearchProvider,
+            webResearchSynthesizer: webResearchSynthesizer
         )
     }
 
@@ -745,6 +1011,55 @@ struct AgentActionExecutorTests {
         )
     }
 
+    private func webMarkdownPlan(url: URL, output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Summarize the article as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web",
+                    operation: .webToMarkdown,
+                    description: "Summarize web article.",
+                    outputPath: output.path,
+                    targetURL: url.absoluteString
+                )
+            ]
+        )
+    }
+
+    private func webComparisonPlan(urls: [URL], output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Compare web sources as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web-comparison",
+                    operation: .webToMarkdown,
+                    description: "Compare source URLs.",
+                    outputPath: output.path,
+                    sourceURLs: urls.map(\.absoluteString)
+                )
+            ]
+        )
+    }
+
+    private func webSearchPlan(query: String, output: URL, count: Int? = nil) -> AgentPlan {
+        AgentPlan(
+            summary: "Research a topic as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web-search",
+                    operation: .webToMarkdown,
+                    description: "Research topic.",
+                    outputPath: output.path,
+                    count: count,
+                    searchQuery: query
+                )
+            ]
+        )
+    }
+
     private func openAppPlan(appName: String) -> AgentPlan {
         AgentPlan(
             summary: "Open \(appName).",
@@ -755,6 +1070,22 @@ struct AgentActionExecutorTests {
                     operation: .openApp,
                     description: "Open \(appName).",
                     appName: appName
+                )
+            ]
+        )
+    }
+
+    private func openAppSearchURLPlan(target: String, query: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Open search.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "search-url",
+                    operation: .openAppSearchURL,
+                    description: "Open search URL.",
+                    appName: target,
+                    searchQuery: query
                 )
             ]
         )
@@ -772,6 +1103,40 @@ struct AgentActionExecutorTests {
                     targetURL: url
                 )
             ]
+        )
+    }
+
+    private func openGeneratedArtifactPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Open generated artifact.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-artifact",
+                    operation: .openGeneratedArtifact,
+                    description: "Open generated artifact.",
+                    outputPath: output.path
+                )
+            ]
+        )
+    }
+
+    private func localDraftPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Create local draft.",
+            requiresConfirmation: true,
+            steps: [localDraftStep(output: output)]
+        )
+    }
+
+    private func localDraftStep(output: URL) -> AgentStep {
+        AgentStep(
+            id: "draft",
+            operation: .createLocalDraft,
+            description: "Create draft.",
+            outputPath: output.path,
+            draftTitle: "Follow Up",
+            draftContent: "Draft body."
         )
     }
 
@@ -880,12 +1245,25 @@ private struct NoopAppOpener: AppOpening {
     func open(bundleIdentifier: String) async throws {}
 }
 
+private struct NoopFileOpener: FileOpening {
+    func openFile(_ url: URL) async throws {}
+}
+
 @MainActor
 private final class RecordingAppOpener: AppOpening {
     private(set) var openedBundleIDs: [String] = []
 
     func open(bundleIdentifier: String) async throws {
         openedBundleIDs.append(bundleIdentifier)
+    }
+}
+
+@MainActor
+private final class RecordingFileOpener: FileOpening {
+    private(set) var openedFiles: [URL] = []
+
+    func openFile(_ url: URL) async throws {
+        openedFiles.append(url.standardizedFileURL)
     }
 }
 
@@ -915,5 +1293,98 @@ private struct StaticHackerNewsFetcher: HackerNewsFetching {
         (1...limit).map { index in
             HackerNewsHeadline(title: "Fixture headline \(index)", url: "https://example.com/\(index)")
         }
+    }
+}
+
+private func webPageLoader(pages: [String: ReadableWebPage]) -> PublicWebPageLoader {
+    PublicWebPageLoader(
+        fetcher: StaticWebPageFetcher(pages: pages),
+        robotsChecker: AllowingRobotsChecker(),
+        extractor: StaticReadableWebExtractor(pages: pages)
+    )
+}
+
+private func readablePage(
+    url: URL,
+    retrievedAt: Date = Date(timeIntervalSince1970: 1_783_526_400),
+    title: String
+) -> ReadableWebPage {
+    ReadableWebPage(
+        sourceURL: url,
+        retrievedAt: retrievedAt,
+        title: title,
+        author: "Fixture Author",
+        publishedDate: "2026-07-08",
+        headings: [title],
+        links: [],
+        images: [],
+        citations: ["Fixture citation"],
+        readableText: "Readable content for \(title)."
+    )
+}
+
+@MainActor
+private struct StaticWebPageFetcher: WebPageFetching {
+    var pages: [String: ReadableWebPage]
+
+    func fetch(_ url: URL) async throws -> FetchedWebPage {
+        guard let page = pages[url.absoluteString] else {
+            throw WebResearchError.noReadableContent(url.absoluteString)
+        }
+        return FetchedWebPage(
+            requestedURL: url,
+            html: page.readableText,
+            retrievedAt: page.retrievedAt
+        )
+    }
+}
+
+@MainActor
+private struct AllowingRobotsChecker: RobotsTXTChecking {
+    func canFetch(_ url: URL, userAgent: String) async throws -> Bool {
+        true
+    }
+}
+
+private struct StaticReadableWebExtractor: ReadableWebExtracting {
+    var pages: [String: ReadableWebPage]
+
+    func extract(html: String, sourceURL: URL, retrievedAt: Date) throws -> ReadableWebPage {
+        guard let page = pages[sourceURL.absoluteString] else {
+            throw WebResearchError.noReadableContent(sourceURL.absoluteString)
+        }
+        return page
+    }
+}
+
+@MainActor
+private final class StaticWebResearchSynthesizer: WebResearchSynthesizing {
+    var note: WebResearchNote
+    private(set) var prompts: [WebResearchSynthesisPrompt] = []
+
+    init(note: WebResearchNote) {
+        self.note = note
+    }
+
+    func synthesize(prompt: WebResearchSynthesisPrompt) async throws -> WebResearchNote {
+        prompts.append(prompt)
+        return note
+    }
+}
+
+@MainActor
+private final class StaticWebSearchProvider: WebSearchProviding {
+    var results: [WebSearchResult]
+    private(set) var queries: [String] = []
+    private(set) var limits: [Int] = []
+
+    init(results: [WebSearchResult]) {
+        self.results = results
+    }
+
+    func search(query: String, limit: Int) async throws -> [WebSearchResult] {
+        queries.append(query)
+        limits.append(limit)
+        return Array(results.prefix(max(limit, 0)))
     }
 }

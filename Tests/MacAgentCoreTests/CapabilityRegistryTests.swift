@@ -29,14 +29,24 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .convertDocxToPDF).metadata.id == "local.documents.docx-to-pdf")
         #expect(try registry.adapter(for: .scanDocx) is DocxConversionCapabilityAdapter)
         #expect(try registry.adapter(for: .convertDocxToPDF) is DocxConversionCapabilityAdapter)
-        #expect(try registry.adapter(for: .writeMarkdown).metadata.id == "local.web.hacker-news-markdown")
-        #expect(try registry.adapter(for: .openHackerNews) is HackerNewsMarkdownCapabilityAdapter)
-        #expect(try registry.adapter(for: .fetchHNHeadlines) is HackerNewsMarkdownCapabilityAdapter)
-        #expect(try registry.adapter(for: .writeMarkdown) is HackerNewsMarkdownCapabilityAdapter)
+        #expect(try registry.adapter(for: .openHackerNews).metadata.id == "local.web.research-markdown")
+        #expect(try registry.adapter(for: .fetchHNHeadlines).metadata.id == "local.web.research-markdown")
+        #expect(try registry.adapter(for: .writeMarkdown).metadata.id == "local.web.research-markdown")
+        #expect(try registry.adapter(for: .openHackerNews) is WebResearchMarkdownCapabilityAdapter)
+        #expect(try registry.adapter(for: .fetchHNHeadlines) is WebResearchMarkdownCapabilityAdapter)
+        #expect(try registry.adapter(for: .writeMarkdown) is WebResearchMarkdownCapabilityAdapter)
+        #expect(try registry.adapter(for: .webToMarkdown).metadata.id == "local.web.research-markdown")
+        #expect(try registry.adapter(for: .webToMarkdown) is WebResearchMarkdownCapabilityAdapter)
         #expect(try registry.adapter(for: .openURL).metadata.id == "local.browser.open-url")
         #expect(try registry.adapter(for: .openURL) is OpenSafeURLCapabilityAdapter)
+        #expect(try registry.adapter(for: .openAppSearchURL).metadata.id == "local.browser.open-app-search-url")
+        #expect(try registry.adapter(for: .openAppSearchURL) is OpenAppSearchURLCapabilityAdapter)
         #expect(try registry.adapter(for: .openApp).metadata.id == "local.apps.open-allowlisted-app")
         #expect(try registry.adapter(for: .openApp) is OpenAllowlistedAppCapabilityAdapter)
+        #expect(try registry.adapter(for: .openGeneratedArtifact).metadata.id == "local.files.open-generated-artifact")
+        #expect(try registry.adapter(for: .openGeneratedArtifact) is OpenGeneratedArtifactCapabilityAdapter)
+        #expect(try registry.adapter(for: .createLocalDraft).metadata.id == "local.files.create-local-draft")
+        #expect(try registry.adapter(for: .createLocalDraft) is CreateLocalDraftCapabilityAdapter)
         #expect(try registry.adapter(for: .playMedia).metadata.id == "local.media.open-result")
         #expect(try registry.adapter(for: .playMedia) is OpenMediaResultCapabilityAdapter)
         #expect(try registry.adapter(for: .getFinderSelection).metadata.id == "local.finder.read-selection")
@@ -92,6 +102,24 @@ struct CapabilityRegistryTests {
         let readiness = try #require(CapabilityRegistry.default.metadata.first { $0.id == "local.permissions.readiness" })
         #expect(readiness.defaultRiskTier == .tier0)
         #expect(readiness.requiredPermissions.isEmpty)
+    }
+
+    @Test
+    func appWebsiteActionDescriptorsDeclarePermissionsRiskAndFallbacks() {
+        let descriptors = AppWebsiteActionDescriptors.all
+        let operations = descriptors.flatMap(\.supportedActions)
+
+        #expect(operations.contains(.openApp))
+        #expect(operations.contains(.openAppSearchURL))
+        #expect(operations.contains(.openURL))
+        #expect(operations.contains(.openGeneratedArtifact))
+        #expect(operations.contains(.createLocalDraft))
+        #expect(operations.contains(.openWorkspace))
+        #expect(descriptors.allSatisfy { !$0.requiredPermissions.isEmpty })
+        #expect(descriptors.allSatisfy { !$0.fallbackBehavior.isEmpty })
+        #expect(AppWebsiteActionDescriptors.openAppSearchURL.defaultRiskTier == .tier1)
+        #expect(AppWebsiteActionDescriptors.openGeneratedArtifact.defaultRiskTier == .tier1)
+        #expect(AppWebsiteActionDescriptors.createLocalDraft.defaultRiskTier == .tier2)
     }
 
     @Test
