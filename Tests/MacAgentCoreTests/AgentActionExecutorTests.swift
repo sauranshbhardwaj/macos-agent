@@ -204,6 +204,99 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func webResearchExecutionWritesMarkdownWithSourcesAndSuggestions() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("web-note.md")
+        let source = URL(string: "https://example.com/article")!
+        let retrievedAt = Date(timeIntervalSince1970: 1_783_526_400)
+        let pageLoader = webPageLoader(pages: [
+            source.absoluteString: readablePage(
+                url: source,
+                retrievedAt: retrievedAt,
+                title: "Article One"
+            )
+        ])
+        let synthesizer = StaticWebResearchSynthesizer(
+            note: WebResearchNote(
+                title: "Article One Notes",
+                summary: "A concise summary.",
+                keyPoints: ["First point"],
+                citations: ["Article One citation"],
+                sources: [
+                    WebResearchNoteSource(
+                        title: "Article One",
+                        url: source.absoluteString,
+                        retrievedAt: ISO8601DateFormatter().string(from: retrievedAt)
+                    )
+                ]
+            )
+        )
+        let executor = makeExecutor(
+            root: root,
+            webPageLoader: pageLoader,
+            webResearchSynthesizer: synthesizer
+        )
+
+        let result = try await executor.execute(plan: webMarkdownPlan(url: source, output: output)) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(markdown.contains("# Article One Notes"))
+        #expect(markdown.contains("Generated:"))
+        #expect(markdown.contains("- [Article One](https://example.com/article)"))
+        #expect(markdown.contains("Retrieved: 2026-07-08T16:00:00Z"))
+        #expect(markdown.contains("A concise summary."))
+        #expect(synthesizer.prompts.count == 1)
+        #expect(synthesizer.prompts[0].trustedPlan.steps.map(\.operation) == [.webToMarkdown])
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Open Markdown" &&
+                suggestion.kind == .openFile &&
+                suggestion.value == output.path
+        })
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Reveal Markdown in Finder" &&
+                suggestion.kind == .revealInFinder &&
+                suggestion.value == output.path
+        })
+    }
+
+    @Test
+    func webResearchCanWriteComparisonMarkdownForMultipleSources() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("comparison.md")
+        let first = URL(string: "https://example.com/one")!
+        let second = URL(string: "https://example.com/two")!
+        let pageLoader = webPageLoader(pages: [
+            first.absoluteString: readablePage(url: first, title: "First Source"),
+            second.absoluteString: readablePage(url: second, title: "Second Source")
+        ])
+        let executor = makeExecutor(
+            root: root,
+            webPageLoader: pageLoader,
+            webResearchSynthesizer: StaticWebResearchSynthesizer(
+                note: WebResearchNote(
+                    title: "Comparison",
+                    summary: "The sources differ.",
+                    keyPoints: ["Compare point"],
+                    citations: [],
+                    sources: []
+                )
+            )
+        )
+
+        let result = try await executor.execute(
+            plan: webComparisonPlan(urls: [first, second], output: output)
+        ) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(markdown.contains("# Comparison"))
+        #expect(markdown.contains("- [First Source](https://example.com/one)"))
+        #expect(markdown.contains("- [Second Source](https://example.com/two)"))
+        #expect(result.summary == "Saved comparison Markdown for 2 sources to \(output.path).")
+    }
+
+    @Test
     func openAppPreviewUsesAllowlist() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -654,7 +747,9 @@ struct AgentActionExecutorTests {
         mediaOpener: MediaOpening = FakeMediaOpener(),
         finderContextReader: FinderContextReading = FakeFinderContextReader(selection: []),
         routineStore: RoutineStore? = nil,
-        workspaceStore: WorkspaceStore? = nil
+        workspaceStore: WorkspaceStore? = nil,
+        webPageLoader: PublicWebPageLoader? = nil,
+        webResearchSynthesizer: (any WebResearchSynthesizing)? = nil
     ) -> AgentActionExecutor {
         AgentActionExecutor(
             whitelist: PathWhitelist(roots: [root]),
@@ -667,7 +762,9 @@ struct AgentActionExecutorTests {
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
-            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json")),
+            webPageLoader: webPageLoader,
+            webResearchSynthesizer: webResearchSynthesizer
         )
     }
 
@@ -740,6 +837,38 @@ struct AgentActionExecutorTests {
                     description: "Write Markdown",
                     outputPath: output.path,
                     count: 5
+                )
+            ]
+        )
+    }
+
+    private func webMarkdownPlan(url: URL, output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Summarize the article as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web",
+                    operation: .webToMarkdown,
+                    description: "Summarize web article.",
+                    outputPath: output.path,
+                    targetURL: url.absoluteString
+                )
+            ]
+        )
+    }
+
+    private func webComparisonPlan(urls: [URL], output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Compare web sources as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web-comparison",
+                    operation: .webToMarkdown,
+                    description: "Compare source URLs.",
+                    outputPath: output.path,
+                    sourceURLs: urls.map(\.absoluteString)
                 )
             ]
         )
@@ -915,5 +1044,81 @@ private struct StaticHackerNewsFetcher: HackerNewsFetching {
         (1...limit).map { index in
             HackerNewsHeadline(title: "Fixture headline \(index)", url: "https://example.com/\(index)")
         }
+    }
+}
+
+private func webPageLoader(pages: [String: ReadableWebPage]) -> PublicWebPageLoader {
+    PublicWebPageLoader(
+        fetcher: StaticWebPageFetcher(pages: pages),
+        robotsChecker: AllowingRobotsChecker(),
+        extractor: StaticReadableWebExtractor(pages: pages)
+    )
+}
+
+private func readablePage(
+    url: URL,
+    retrievedAt: Date = Date(timeIntervalSince1970: 1_783_526_400),
+    title: String
+) -> ReadableWebPage {
+    ReadableWebPage(
+        sourceURL: url,
+        retrievedAt: retrievedAt,
+        title: title,
+        author: "Fixture Author",
+        publishedDate: "2026-07-08",
+        headings: [title],
+        links: [],
+        images: [],
+        citations: ["Fixture citation"],
+        readableText: "Readable content for \(title)."
+    )
+}
+
+@MainActor
+private struct StaticWebPageFetcher: WebPageFetching {
+    var pages: [String: ReadableWebPage]
+
+    func fetch(_ url: URL) async throws -> FetchedWebPage {
+        guard let page = pages[url.absoluteString] else {
+            throw WebResearchError.noReadableContent(url.absoluteString)
+        }
+        return FetchedWebPage(
+            requestedURL: url,
+            html: page.readableText,
+            retrievedAt: page.retrievedAt
+        )
+    }
+}
+
+@MainActor
+private struct AllowingRobotsChecker: RobotsTXTChecking {
+    func canFetch(_ url: URL, userAgent: String) async throws -> Bool {
+        true
+    }
+}
+
+private struct StaticReadableWebExtractor: ReadableWebExtracting {
+    var pages: [String: ReadableWebPage]
+
+    func extract(html: String, sourceURL: URL, retrievedAt: Date) throws -> ReadableWebPage {
+        guard let page = pages[sourceURL.absoluteString] else {
+            throw WebResearchError.noReadableContent(sourceURL.absoluteString)
+        }
+        return page
+    }
+}
+
+@MainActor
+private final class StaticWebResearchSynthesizer: WebResearchSynthesizing {
+    var note: WebResearchNote
+    private(set) var prompts: [WebResearchSynthesisPrompt] = []
+
+    init(note: WebResearchNote) {
+        self.note = note
+    }
+
+    func synthesize(prompt: WebResearchSynthesisPrompt) async throws -> WebResearchNote {
+        prompts.append(prompt)
+        return note
     }
 }

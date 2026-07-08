@@ -6,6 +6,7 @@ public enum DefaultCapabilityAdapters {
             LargestFilesZipCapabilityAdapter(),
             DocxConversionCapabilityAdapter(),
             HackerNewsMarkdownCapabilityAdapter(),
+            WebResearchMarkdownCapabilityAdapter(),
             OpenAllowlistedAppCapabilityAdapter(),
             OpenSafeURLCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),

@@ -26,6 +26,8 @@ struct PlannerBoundaryTests {
         - For largest files, produce scan_select_largest_files then create_zip.
         - For DOCX conversion, produce scan_docx then convert_docx_to_pdf.
         - For Hacker News headline saving, produce open_hacker_news, fetch_hn_headlines, then write_markdown.
+        - For summarizing one public web page to Markdown, produce one web_to_markdown step with targetURL and optional outputPath.
+        - For comparing multiple public web sources to Markdown, produce one web_to_markdown step with sourceURLs and optional outputPath.
         - For opening an app, produce one open_app step with appName.
         - For opening a general website, produce one open_url step with targetURL using http or https.
         - For song or album requests, produce one play_media step with mediaProvider, mediaTitle, optional mediaArtist, and targetURL only if the user supplied an exact Apple Music or Spotify result URI. The local executor opens the provider result; it does not start playback.
@@ -83,7 +85,8 @@ struct PlannerBoundaryTests {
             "routineSteps",
             "workspaceName",
             "workspaceApps",
-            "workspaceURLs"
+            "workspaceURLs",
+            "sourceURLs"
         ])
 
         let stepProperties = try #require(stepItems["properties"] as? [String: Any])
@@ -143,6 +146,12 @@ private let expectedDefaultPlannerDescription = """
   side effects: write file
   dry run: Show the Markdown path without writing it.
   examples: Save to a Markdown file
+- web_to_markdown: Web page to Markdown
+  description: Fetch one public http/https URL, or multiple http/https sourceURLs for comparison, synthesize a research note, and save Markdown in a whitelisted output path.
+  required fields: targetURL or sourceURLs
+  side effects: network request, send fetched public page content to OpenAI, write file
+  dry run: Show source URL(s) and Markdown output path without fetching pages or writing files.
+  examples: Summarize https://example.com/article and save as Markdown | Compare these source URLs and save a Markdown note
 - open_app: Open allowlisted Mac app
   description: Open an app from the local allowlist by human app name. Supported apps: Safari, Chrome, Finder, Notes, Calendar, Mail, Messages, Apple Music, Spotify, Slack, VS Code, Terminal.
   required fields: appName

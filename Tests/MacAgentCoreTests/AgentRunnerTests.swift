@@ -273,6 +273,27 @@ struct AgentRunnerTests {
     }
 
     @Test
+    func existingWebResearchMarkdownOutputEscalatesAndMarksDataLeavingDevice() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("web.md")
+        try write("existing markdown", to: output)
+        let runner = AgentRunner(
+            planner: StaticPlanner(plan: webMarkdownPlan(output: output)),
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Summarize this article as Markdown")
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.defaultTier == .tier2)
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.approvalCopy.dataLeavesDevice == true)
+        #expect(request.assessment.escalations.first?.reason == "Markdown output already exists at \(output.path).")
+    }
+
+    @Test
     func replacingExistingRoutineEscalatesToTierThree() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -670,6 +691,22 @@ struct AgentRunnerTests {
                     description: "Write Markdown.",
                     outputPath: output.path,
                     count: 5
+                )
+            ]
+        )
+    }
+
+    private func webMarkdownPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Summarize web article as Markdown.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "web",
+                    operation: .webToMarkdown,
+                    description: "Create web Markdown.",
+                    outputPath: output.path,
+                    targetURL: "https://example.com/article"
                 )
             ]
         )

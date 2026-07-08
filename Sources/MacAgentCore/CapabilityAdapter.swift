@@ -128,6 +128,8 @@ public struct CapabilityExecutionContext {
     public var permissionReadinessService: PermissionReadinessService
     public var routineStore: RoutineStore
     public var workspaceStore: WorkspaceStore
+    public var webPageLoader: PublicWebPageLoader
+    public var webResearchSynthesizer: any WebResearchSynthesizing
     public var fileManager: FileManager
     public var now: () -> Date
     public var assessNestedPlan: AssessNestedPlan
@@ -148,6 +150,8 @@ public struct CapabilityExecutionContext {
         permissionReadinessService: PermissionReadinessService,
         routineStore: RoutineStore,
         workspaceStore: WorkspaceStore,
+        webPageLoader: PublicWebPageLoader,
+        webResearchSynthesizer: any WebResearchSynthesizing,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
         assessNestedPlan: @escaping AssessNestedPlan,
@@ -167,6 +171,8 @@ public struct CapabilityExecutionContext {
         self.permissionReadinessService = permissionReadinessService
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
+        self.webPageLoader = webPageLoader
+        self.webResearchSynthesizer = webResearchSynthesizer
         self.fileManager = fileManager
         self.now = now
         self.assessNestedPlan = assessNestedPlan

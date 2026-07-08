@@ -298,6 +298,16 @@ public protocol WebResearchSynthesizing {
 }
 
 @MainActor
+public struct EnvironmentWebResearchSynthesizer: WebResearchSynthesizing {
+    public init() {}
+
+    public func synthesize(prompt: WebResearchSynthesisPrompt) async throws -> WebResearchNote {
+        let synthesizer = try OpenAIWebResearchSynthesizer()
+        return try await synthesizer.synthesize(prompt: prompt)
+    }
+}
+
+@MainActor
 public final class OpenAIWebResearchSynthesizer: WebResearchSynthesizing {
     private let apiKey: String
     private let model: String

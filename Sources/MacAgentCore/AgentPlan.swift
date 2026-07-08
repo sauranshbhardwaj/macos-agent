@@ -31,6 +31,7 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var workspaceName: String?
     public var workspaceApps: [String]?
     public var workspaceURLs: [String]?
+    public var sourceURLs: [String]?
 
     public init(
         id: String,
@@ -50,7 +51,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         routineSteps: [AgentStep]? = nil,
         workspaceName: String? = nil,
         workspaceApps: [String]? = nil,
-        workspaceURLs: [String]? = nil
+        workspaceURLs: [String]? = nil,
+        sourceURLs: [String]? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -70,6 +72,7 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.workspaceName = workspaceName
         self.workspaceApps = workspaceApps
         self.workspaceURLs = workspaceURLs
+        self.sourceURLs = sourceURLs
     }
 }
 
@@ -81,6 +84,7 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case openHackerNews = "open_hacker_news"
     case fetchHNHeadlines = "fetch_hn_headlines"
     case writeMarkdown = "write_markdown"
+    case webToMarkdown = "web_to_markdown"
     case openApp = "open_app"
     case openURL = "open_url"
     case playMedia = "play_media"
@@ -154,7 +158,8 @@ public enum AgentPlanDecoder {
         "routineSteps",
         "workspaceName",
         "workspaceApps",
-        "workspaceURLs"
+        "workspaceURLs",
+        "sourceURLs"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -219,7 +224,8 @@ public enum AgentPlanSchema {
         "routineSteps",
         "workspaceName",
         "workspaceApps",
-        "workspaceURLs"
+        "workspaceURLs",
+        "sourceURLs"
     ]
 
     public static func responseFormat() -> [String: Any] {
@@ -337,6 +343,11 @@ public enum AgentPlanSchema {
             "workspaceURLs": [
                 "type": ["array", "null"],
                 "description": "HTTP/HTTPS URLs for create_workspace, or null.",
+                "items": ["type": "string"]
+            ],
+            "sourceURLs": [
+                "type": ["array", "null"],
+                "description": "HTTP/HTTPS source URLs for web_to_markdown comparison notes, or null.",
                 "items": ["type": "string"]
             ]
         ]

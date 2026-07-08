@@ -444,6 +444,8 @@ private struct SavedItemsPanel: View {
             return "Fetch HN headlines"
         case .writeMarkdown:
             return "Write Markdown"
+        case .webToMarkdown:
+            return "Web to Markdown"
         case .getFinderSelection:
             return "Read Finder selection"
         case .revealInFinder:

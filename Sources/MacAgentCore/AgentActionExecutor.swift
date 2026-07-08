@@ -57,6 +57,8 @@ public final class AgentActionExecutor {
     private let permissionReadinessService: PermissionReadinessService
     private let routineStore: RoutineStore
     private let workspaceStore: WorkspaceStore
+    private let webPageLoader: PublicWebPageLoader
+    private let webResearchSynthesizer: any WebResearchSynthesizing
     private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
     private let now: () -> Date
@@ -75,6 +77,8 @@ public final class AgentActionExecutor {
         permissionReadinessService: PermissionReadinessService = PermissionReadinessService(),
         routineStore: RoutineStore = RoutineStore(),
         workspaceStore: WorkspaceStore = WorkspaceStore(),
+        webPageLoader: PublicWebPageLoader? = nil,
+        webResearchSynthesizer: (any WebResearchSynthesizing)? = nil,
         capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -92,6 +96,8 @@ public final class AgentActionExecutor {
         self.permissionReadinessService = permissionReadinessService
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
+        self.webPageLoader = webPageLoader ?? PublicWebPageLoader.live()
+        self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer()
         self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
         self.now = now
@@ -147,6 +153,8 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .scanDocx, plan: plan)
         case .hackerNews:
             return try previewCapability(for: .openHackerNews, plan: plan)
+        case .webResearch:
+            return try previewCapability(for: .webToMarkdown, plan: plan)
         case .openApp:
             return try previewCapability(for: .openApp, plan: plan)
         case .openURL:
@@ -188,6 +196,8 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .scanDocx, plan: resolvedPlan, log: log)
         case .hackerNews:
             return try await executeCapability(for: .openHackerNews, plan: resolvedPlan, log: log)
+        case .webResearch:
+            return try await executeCapability(for: .webToMarkdown, plan: resolvedPlan, log: log)
         case .openApp:
             return try await executeCapability(for: .openApp, plan: resolvedPlan, log: log)
         case .openURL:
@@ -218,6 +228,7 @@ public final class AgentActionExecutor {
         case largestFiles
         case docx
         case hackerNews
+        case webResearch
         case openApp
         case openURL
         case mediaOpen
@@ -269,6 +280,7 @@ public final class AgentActionExecutor {
              .largestFiles,
              .docx,
              .hackerNews,
+             .webResearch,
              .chain:
             return false
         }
@@ -284,6 +296,8 @@ public final class AgentActionExecutor {
             return .docx
         case .openHackerNews, .fetchHNHeadlines, .writeMarkdown:
             return .hackerNews
+        case .webToMarkdown:
+            return .webResearch
         case .openApp:
             return .openApp
         case .openURL:
@@ -336,6 +350,12 @@ public final class AgentActionExecutor {
         if let markdownIndex = resolvedPlan.steps.firstIndex(where: { $0.operation == .writeMarkdown }) {
             resolvedPlan = try capabilityRegistry
                 .adapter(for: resolvedPlan.steps[markdownIndex].operation)
+                .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
+        }
+
+        if resolvedPlan.steps.contains(where: { $0.operation == .webToMarkdown }) {
+            resolvedPlan = try capabilityRegistry
+                .adapter(for: .webToMarkdown)
                 .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
         }
 
@@ -429,6 +449,9 @@ public final class AgentActionExecutor {
         for step in plan.steps {
             appendIfPresent(step.appName, to: &resources)
             appendIfPresent(step.targetURL, to: &resources)
+            if let sourceURLs = step.sourceURLs {
+                resources.append(contentsOf: sourceURLs)
+            }
             appendIfPresent(step.outputPath, to: &resources)
             appendIfPresent(step.inputPath, to: &resources)
             appendIfPresent(step.routineName.map { "Routine: \($0)" }, to: &resources)
@@ -453,7 +476,7 @@ public final class AgentActionExecutor {
     private func dataLeavesDevice(in plan: AgentPlan) -> Bool {
         plan.steps.contains { step in
             switch step.operation {
-            case .openHackerNews, .fetchHNHeadlines, .openURL, .playMedia, .openWorkspace:
+            case .openHackerNews, .fetchHNHeadlines, .webToMarkdown, .openURL, .playMedia, .openWorkspace:
                 return true
             default:
                 return false
@@ -510,6 +533,8 @@ public final class AgentActionExecutor {
             permissionReadinessService: permissionReadinessService,
             routineStore: routineStore,
             workspaceStore: workspaceStore,
+            webPageLoader: webPageLoader,
+            webResearchSynthesizer: webResearchSynthesizer,
             fileManager: fileManager,
             now: now,
             assessNestedPlan: { [weak self] plan in
