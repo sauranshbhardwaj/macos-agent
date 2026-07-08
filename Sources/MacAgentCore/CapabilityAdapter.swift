@@ -122,7 +122,9 @@ public struct CapabilityExecutionContext {
     public var browserOpener: any BrowserOpening
     public var hackerNewsFetcher: any HackerNewsFetching
     public var appCatalog: MacAppCatalog
+    public var appSearchURLCatalog: AppSearchURLCatalog
     public var appOpener: any AppOpening
+    public var fileOpener: any FileOpening
     public var mediaOpener: any MediaOpening
     public var finderContextReader: any FinderContextReading
     public var permissionReadinessService: PermissionReadinessService
@@ -145,7 +147,9 @@ public struct CapabilityExecutionContext {
         browserOpener: any BrowserOpening,
         hackerNewsFetcher: any HackerNewsFetching,
         appCatalog: MacAppCatalog,
+        appSearchURLCatalog: AppSearchURLCatalog,
         appOpener: any AppOpening,
+        fileOpener: any FileOpening,
         mediaOpener: any MediaOpening,
         finderContextReader: any FinderContextReading,
         permissionReadinessService: PermissionReadinessService,
@@ -167,7 +171,9 @@ public struct CapabilityExecutionContext {
         self.browserOpener = browserOpener
         self.hackerNewsFetcher = hackerNewsFetcher
         self.appCatalog = appCatalog
+        self.appSearchURLCatalog = appSearchURLCatalog
         self.appOpener = appOpener
+        self.fileOpener = fileOpener
         self.mediaOpener = mediaOpener
         self.finderContextReader = finderContextReader
         self.permissionReadinessService = permissionReadinessService

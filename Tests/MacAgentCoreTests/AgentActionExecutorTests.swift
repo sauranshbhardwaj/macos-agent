@@ -417,6 +417,27 @@ struct AgentActionExecutorTests {
     }
 
     @Test
+    func openAppSearchURLUsesFixedAllowlistedTemplatesOnly() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let browserOpener = RecordingBrowserOpener()
+        let executor = makeExecutor(root: root, browserOpener: browserOpener)
+
+        let preview = try executor.preview(plan: openAppSearchURLPlan(target: "GitHub", query: "Swift concurrency"))
+
+        #expect(preview.first?.title == "Open GitHub search")
+        #expect(preview.first?.opens.first == "https://github.com/search?q=Swift%20concurrency")
+        #expect(preview.first?.details.contains("Allowed search targets: Google, GitHub, YouTube, Apple Music, Spotify") == true)
+        let result = try await executor.execute(plan: openAppSearchURLPlan(target: "GitHub", query: "Swift concurrency")) { _, _ in }
+
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com/search?q=Swift%20concurrency"])
+        #expect(result.summary == "Opened GitHub search for Swift concurrency.")
+        #expect(throws: AppSearchURLCatalogError.searchTargetNotAllowed("Untrusted")) {
+            try executor.preview(plan: openAppSearchURLPlan(target: "Untrusted", query: "Swift"))
+        }
+    }
+
+    @Test
     func openAppAndURLExecutionUseInjectedOpeners() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -806,6 +827,78 @@ struct AgentActionExecutorTests {
         #expect(result.summary == "Opened workspace Research with 1 app(s) and 1 URL(s).")
     }
 
+    @Test
+    func createLocalDraftWritesWhitelistedMarkdownAndSuggestsOpenReveal() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("draft.md")
+        let executor = makeExecutor(root: root)
+
+        let result = try await executor.execute(plan: localDraftPlan(output: output)) { _, _ in }
+
+        let markdown = try String(contentsOf: output)
+        #expect(markdown.contains("# Follow Up"))
+        #expect(markdown.contains("Draft body."))
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Open Draft" &&
+                suggestion.kind == .openFile &&
+                suggestion.value == output.path
+        })
+        #expect(result.suggestions.contains { suggestion in
+            suggestion.title == "Reveal Draft in Finder" &&
+                suggestion.kind == .revealInFinder &&
+                suggestion.value == output.path
+        })
+    }
+
+    @Test
+    func openGeneratedArtifactUsesInjectedFileOpenerAndRejectsOutsideWhitelist() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let artifact = root.appendingPathComponent("artifact.md")
+        try write("artifact", to: artifact)
+        let fileOpener = RecordingFileOpener()
+        let executor = makeExecutor(root: root, fileOpener: fileOpener)
+
+        let result = try await executor.execute(plan: openGeneratedArtifactPlan(output: artifact)) { _, _ in }
+
+        #expect(fileOpener.openedFiles == [artifact.standardizedFileURL])
+        #expect(result.summary == "Opened generated artifact \(artifact.path).")
+        #expect(throws: PathValidationError.outsideWhitelist("/private/tmp/not-allowed.md", [root.path])) {
+            try executor.preview(plan: openGeneratedArtifactPlan(output: URL(fileURLWithPath: "/private/tmp/not-allowed.md")))
+        }
+    }
+
+    @Test
+    func chainCanOpenFutureGeneratedArtifact() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("draft.md")
+        let fileOpener = RecordingFileOpener()
+        let executor = makeExecutor(root: root, fileOpener: fileOpener)
+        let plan = AgentPlan(
+            summary: "Create and open draft.",
+            requiresConfirmation: true,
+            steps: [
+                localDraftStep(output: output),
+                AgentStep(
+                    id: "open-artifact",
+                    operation: .openGeneratedArtifact,
+                    description: "Open generated draft."
+                )
+            ]
+        )
+
+        let preview = try executor.preview(plan: plan)
+        let result = try await executor.execute(plan: plan) { _, _ in }
+
+        #expect(preview.count == 2)
+        #expect(preview[1].details == ["Open \(output.path)"])
+        #expect(fileOpener.openedFiles == [output.standardizedFileURL])
+        #expect(result.summary.contains("Created local draft"))
+        #expect(result.summary.contains("Opened generated artifact"))
+    }
+
     private func makeExecutor(
         root: URL,
         zipArchiver: ZipArchiving = RecordingZipArchiver(),
@@ -813,7 +906,9 @@ struct AgentActionExecutorTests {
         browserOpener: BrowserOpening = NoopBrowserOpener(),
         hackerNewsFetcher: HackerNewsFetching = StaticHackerNewsFetcher(),
         appCatalog: MacAppCatalog = .default,
+        appSearchURLCatalog: AppSearchURLCatalog = .default,
         appOpener: AppOpening = NoopAppOpener(),
+        fileOpener: FileOpening = NoopFileOpener(),
         mediaOpener: MediaOpening = FakeMediaOpener(),
         finderContextReader: FinderContextReading = FakeFinderContextReader(selection: []),
         routineStore: RoutineStore? = nil,
@@ -829,7 +924,9 @@ struct AgentActionExecutorTests {
             browserOpener: browserOpener,
             hackerNewsFetcher: hackerNewsFetcher,
             appCatalog: appCatalog,
+            appSearchURLCatalog: appSearchURLCatalog,
             appOpener: appOpener,
+            fileOpener: fileOpener,
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
@@ -978,6 +1075,22 @@ struct AgentActionExecutorTests {
         )
     }
 
+    private func openAppSearchURLPlan(target: String, query: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Open search.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "search-url",
+                    operation: .openAppSearchURL,
+                    description: "Open search URL.",
+                    appName: target,
+                    searchQuery: query
+                )
+            ]
+        )
+    }
+
     private func openURLPlan(url: String) -> AgentPlan {
         AgentPlan(
             summary: "Open \(url).",
@@ -990,6 +1103,40 @@ struct AgentActionExecutorTests {
                     targetURL: url
                 )
             ]
+        )
+    }
+
+    private func openGeneratedArtifactPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Open generated artifact.",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-artifact",
+                    operation: .openGeneratedArtifact,
+                    description: "Open generated artifact.",
+                    outputPath: output.path
+                )
+            ]
+        )
+    }
+
+    private func localDraftPlan(output: URL) -> AgentPlan {
+        AgentPlan(
+            summary: "Create local draft.",
+            requiresConfirmation: true,
+            steps: [localDraftStep(output: output)]
+        )
+    }
+
+    private func localDraftStep(output: URL) -> AgentStep {
+        AgentStep(
+            id: "draft",
+            operation: .createLocalDraft,
+            description: "Create draft.",
+            outputPath: output.path,
+            draftTitle: "Follow Up",
+            draftContent: "Draft body."
         )
     }
 
@@ -1098,12 +1245,25 @@ private struct NoopAppOpener: AppOpening {
     func open(bundleIdentifier: String) async throws {}
 }
 
+private struct NoopFileOpener: FileOpening {
+    func openFile(_ url: URL) async throws {}
+}
+
 @MainActor
 private final class RecordingAppOpener: AppOpening {
     private(set) var openedBundleIDs: [String] = []
 
     func open(bundleIdentifier: String) async throws {
         openedBundleIDs.append(bundleIdentifier)
+    }
+}
+
+@MainActor
+private final class RecordingFileOpener: FileOpening {
+    private(set) var openedFiles: [URL] = []
+
+    func openFile(_ url: URL) async throws {
+        openedFiles.append(url.standardizedFileURL)
     }
 }
 

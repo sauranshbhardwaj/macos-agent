@@ -8,10 +8,10 @@ public struct OpenSafeURLCapabilityAdapter: CapabilityAdapter {
     }
 
     public static let metadata = CapabilityMetadata(
-        id: "local.browser.open-url",
-        displayName: "Open safe web URL",
-        description: "Open a validated http or https URL in the default browser.",
-        operations: [.openURL],
+        id: descriptor.capabilityID,
+        displayName: descriptor.displayName,
+        description: descriptor.description,
+        operations: descriptor.supportedActions,
         plannerTools: [
             AgentTool(
                 operation: .openURL,
@@ -23,11 +23,11 @@ public struct OpenSafeURLCapabilityAdapter: CapabilityAdapter {
                 examples: ["Open GitHub", "Open https://gmail.com"]
             )
         ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .browserOpening)
-        ],
-        defaultRiskTier: .tier1
+        requiredPermissions: descriptor.requiredPermissions,
+        defaultRiskTier: descriptor.defaultRiskTier
     )
+
+    public static let descriptor = AppWebsiteActionDescriptors.openURL
 
     public func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview] {
         let spec = try spec(in: plan)

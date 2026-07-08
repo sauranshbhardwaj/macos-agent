@@ -51,7 +51,9 @@ public final class AgentActionExecutor {
     private let browserOpener: BrowserOpening
     private let hackerNewsFetcher: HackerNewsFetching
     private let appCatalog: MacAppCatalog
+    private let appSearchURLCatalog: AppSearchURLCatalog
     private let appOpener: AppOpening
+    private let fileOpener: FileOpening
     private let mediaOpener: MediaOpening
     private let finderContextReader: FinderContextReading
     private let permissionReadinessService: PermissionReadinessService
@@ -72,7 +74,9 @@ public final class AgentActionExecutor {
         browserOpener: BrowserOpening = WorkspaceBrowserOpener(),
         hackerNewsFetcher: HackerNewsFetching = HackerNewsAPIClient(),
         appCatalog: MacAppCatalog = .default,
+        appSearchURLCatalog: AppSearchURLCatalog = .default,
         appOpener: AppOpening = WorkspaceAppOpener(),
+        fileOpener: FileOpening = WorkspaceFileOpener(),
         mediaOpener: MediaOpening = NativeMediaOpener(),
         finderContextReader: FinderContextReading = AppleScriptFinderContextReader(),
         permissionReadinessService: PermissionReadinessService = PermissionReadinessService(),
@@ -92,7 +96,9 @@ public final class AgentActionExecutor {
         self.browserOpener = browserOpener
         self.hackerNewsFetcher = hackerNewsFetcher
         self.appCatalog = appCatalog
+        self.appSearchURLCatalog = appSearchURLCatalog
         self.appOpener = appOpener
+        self.fileOpener = fileOpener
         self.mediaOpener = mediaOpener
         self.finderContextReader = finderContextReader
         self.permissionReadinessService = permissionReadinessService
@@ -160,8 +166,14 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .webToMarkdown, plan: plan)
         case .openApp:
             return try previewCapability(for: .openApp, plan: plan)
+        case .openAppSearchURL:
+            return try previewCapability(for: .openAppSearchURL, plan: plan)
         case .openURL:
             return try previewCapability(for: .openURL, plan: plan)
+        case .openGeneratedArtifact:
+            return try previewCapability(for: .openGeneratedArtifact, plan: plan)
+        case .createLocalDraft:
+            return try previewCapability(for: .createLocalDraft, plan: plan)
         case .mediaOpen:
             return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
@@ -203,8 +215,14 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .webToMarkdown, plan: resolvedPlan, log: log)
         case .openApp:
             return try await executeCapability(for: .openApp, plan: resolvedPlan, log: log)
+        case .openAppSearchURL:
+            return try await executeCapability(for: .openAppSearchURL, plan: resolvedPlan, log: log)
         case .openURL:
             return try await executeCapability(for: .openURL, plan: resolvedPlan, log: log)
+        case .openGeneratedArtifact:
+            return try await executeCapability(for: .openGeneratedArtifact, plan: resolvedPlan, log: log)
+        case .createLocalDraft:
+            return try await executeCapability(for: .createLocalDraft, plan: resolvedPlan, log: log)
         case .mediaOpen:
             return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
@@ -233,7 +251,10 @@ public final class AgentActionExecutor {
         case hackerNews
         case webResearch
         case openApp
+        case openAppSearchURL
         case openURL
+        case openGeneratedArtifact
+        case createLocalDraft
         case mediaOpen
         case finderSelection
         case revealInFinder
@@ -269,7 +290,10 @@ public final class AgentActionExecutor {
     private func shouldChainWhenRepeated(_ workflow: Workflow) -> Bool {
         switch workflow {
         case .openApp,
+             .openAppSearchURL,
              .openURL,
+             .openGeneratedArtifact,
+             .createLocalDraft,
              .mediaOpen,
              .finderSelection,
              .revealInFinder,
@@ -303,8 +327,14 @@ public final class AgentActionExecutor {
             return .webResearch
         case .openApp:
             return .openApp
+        case .openAppSearchURL:
+            return .openAppSearchURL
         case .openURL:
             return .openURL
+        case .openGeneratedArtifact:
+            return .openGeneratedArtifact
+        case .createLocalDraft:
+            return .createLocalDraft
         case .playMedia:
             return .mediaOpen
         case .getFinderSelection:
@@ -359,6 +389,12 @@ public final class AgentActionExecutor {
         if resolvedPlan.steps.contains(where: { $0.operation == .webToMarkdown }) {
             resolvedPlan = try capabilityRegistry
                 .adapter(for: .webToMarkdown)
+                .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
+        }
+
+        if resolvedPlan.steps.contains(where: { $0.operation == .createLocalDraft }) {
+            resolvedPlan = try capabilityRegistry
+                .adapter(for: .createLocalDraft)
                 .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
         }
 
@@ -480,7 +516,13 @@ public final class AgentActionExecutor {
     private func dataLeavesDevice(in plan: AgentPlan) -> Bool {
         plan.steps.contains { step in
             switch step.operation {
-            case .openHackerNews, .fetchHNHeadlines, .webToMarkdown, .openURL, .playMedia, .openWorkspace:
+            case .openHackerNews,
+                 .fetchHNHeadlines,
+                 .webToMarkdown,
+                 .openAppSearchURL,
+                 .openURL,
+                 .playMedia,
+                 .openWorkspace:
                 return true
             default:
                 return false
@@ -531,7 +573,9 @@ public final class AgentActionExecutor {
             browserOpener: browserOpener,
             hackerNewsFetcher: hackerNewsFetcher,
             appCatalog: appCatalog,
+            appSearchURLCatalog: appSearchURLCatalog,
             appOpener: appOpener,
+            fileOpener: fileOpener,
             mediaOpener: mediaOpener,
             finderContextReader: finderContextReader,
             permissionReadinessService: permissionReadinessService,
@@ -568,7 +612,7 @@ public final class AgentActionExecutor {
         var previousArtifactPath: String?
 
         for segment in try segmentPlans(in: plan) {
-            let resolved = resolveRevealPathIfNeeded(in: segment, previousArtifactPath: previousArtifactPath)
+            let resolved = resolvePreviousArtifactPathIfNeeded(in: segment, previousArtifactPath: previousArtifactPath)
             let segmentPreviews = try preview(plan: resolved)
             previews.append(contentsOf: segmentPreviews)
             if let producedPath = segmentPreviews.flatMap(\.writes).last {
@@ -588,7 +632,7 @@ public final class AgentActionExecutor {
         var previousArtifactPath: String?
 
         for segment in try segmentPlans(in: plan) {
-            let resolved = resolveRevealPathIfNeeded(in: segment, previousArtifactPath: previousArtifactPath)
+            let resolved = resolvePreviousArtifactPathIfNeeded(in: segment, previousArtifactPath: previousArtifactPath)
             let result = try await execute(plan: resolved, log: log)
             summaries.append(result.summary)
             suggestions.append(contentsOf: result.suggestions)
@@ -652,9 +696,9 @@ public final class AgentActionExecutor {
         )
     }
 
-    private func resolveRevealPathIfNeeded(in plan: AgentPlan, previousArtifactPath: String?) -> AgentPlan {
+    private func resolvePreviousArtifactPathIfNeeded(in plan: AgentPlan, previousArtifactPath: String?) -> AgentPlan {
         guard plan.steps.count == 1,
-              plan.steps[0].operation == .revealInFinder,
+              [.revealInFinder, .openGeneratedArtifact].contains(plan.steps[0].operation),
               plan.steps[0].outputPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
               plan.steps[0].inputPath?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false,
               let previousArtifactPath else {

@@ -33,6 +33,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var workspaceURLs: [String]?
     public var sourceURLs: [String]?
     public var searchQuery: String?
+    public var draftTitle: String?
+    public var draftContent: String?
 
     public init(
         id: String,
@@ -54,7 +56,9 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         workspaceApps: [String]? = nil,
         workspaceURLs: [String]? = nil,
         sourceURLs: [String]? = nil,
-        searchQuery: String? = nil
+        searchQuery: String? = nil,
+        draftTitle: String? = nil,
+        draftContent: String? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -76,6 +80,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.workspaceURLs = workspaceURLs
         self.sourceURLs = sourceURLs
         self.searchQuery = searchQuery
+        self.draftTitle = draftTitle
+        self.draftContent = draftContent
     }
 }
 
@@ -89,6 +95,7 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case writeMarkdown = "write_markdown"
     case webToMarkdown = "web_to_markdown"
     case openApp = "open_app"
+    case openAppSearchURL = "open_app_search_url"
     case openURL = "open_url"
     case playMedia = "play_media"
     case getFinderSelection = "get_finder_selection"
@@ -98,6 +105,8 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case runRoutine = "run_routine"
     case createWorkspace = "create_workspace"
     case openWorkspace = "open_workspace"
+    case openGeneratedArtifact = "open_generated_artifact"
+    case createLocalDraft = "create_local_draft"
     case clarify
     case unsupported
 }
@@ -163,7 +172,9 @@ public enum AgentPlanDecoder {
         "workspaceApps",
         "workspaceURLs",
         "sourceURLs",
-        "searchQuery"
+        "searchQuery",
+        "draftTitle",
+        "draftContent"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -230,7 +241,9 @@ public enum AgentPlanSchema {
         "workspaceApps",
         "workspaceURLs",
         "sourceURLs",
-        "searchQuery"
+        "searchQuery",
+        "draftTitle",
+        "draftContent"
     ]
 
     public static func responseFormat() -> [String: Any] {
@@ -358,6 +371,14 @@ public enum AgentPlanSchema {
             "searchQuery": [
                 "type": ["string", "null"],
                 "description": "Topic or web search query for web_to_markdown research notes, or null."
+            ],
+            "draftTitle": [
+                "type": ["string", "null"],
+                "description": "Title for create_local_draft Markdown drafts, or null."
+            ],
+            "draftContent": [
+                "type": ["string", "null"],
+                "description": "User-provided body content for create_local_draft Markdown drafts, or null."
             ]
         ]
     }

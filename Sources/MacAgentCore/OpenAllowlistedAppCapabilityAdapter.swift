@@ -8,10 +8,10 @@ public struct OpenAllowlistedAppCapabilityAdapter: CapabilityAdapter {
     }
 
     public static let metadata = CapabilityMetadata(
-        id: "local.apps.open-allowlisted-app",
-        displayName: "Open allowlisted Mac app",
-        description: "Open an app from the local allowlist by human app name.",
-        operations: [.openApp],
+        id: descriptor.capabilityID,
+        displayName: descriptor.displayName,
+        description: descriptor.description,
+        operations: descriptor.supportedActions,
         plannerTools: [
             AgentTool(
                 operation: .openApp,
@@ -23,11 +23,11 @@ public struct OpenAllowlistedAppCapabilityAdapter: CapabilityAdapter {
                 examples: ["Open Safari", "Open Spotify", "Launch Apple Music"]
             )
         ],
-        requiredPermissions: [
-            CapabilityPermissionMetadata(requirement: .appOpening)
-        ],
-        defaultRiskTier: .tier1
+        requiredPermissions: descriptor.requiredPermissions,
+        defaultRiskTier: descriptor.defaultRiskTier
     )
+
+    public static let descriptor = AppWebsiteActionDescriptors.openApp
 
     public func preview(plan: AgentPlan, context: CapabilityExecutionContext) throws -> [ActionPreview] {
         let spec = try spec(in: plan, context: context)

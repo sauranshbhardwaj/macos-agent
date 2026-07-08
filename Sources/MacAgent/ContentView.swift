@@ -426,8 +426,14 @@ private struct SavedItemsPanel: View {
         switch step.operation {
         case .openApp:
             return "Open \(step.appName ?? "app")"
+        case .openAppSearchURL:
+            return "Open search"
         case .openURL:
             return "Open \(step.targetURL ?? "URL")"
+        case .openGeneratedArtifact:
+            return "Open artifact"
+        case .createLocalDraft:
+            return "Create draft"
         case .playMedia:
             return "Open \(step.mediaTitle ?? "music")"
         case .scanSelectLargestFiles:
