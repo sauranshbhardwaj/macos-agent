@@ -5,17 +5,26 @@ public struct MediaPlaybackRequest: Equatable, Sendable {
     public var provider: MediaProvider
     public var title: String
     public var artist: String?
+    public var albumTitle: String?
+    public var durationMilliseconds: Int?
+    public var market: String?
     public var mediaURI: String?
 
     public init(
         provider: MediaProvider,
         title: String,
         artist: String? = nil,
+        albumTitle: String? = nil,
+        durationMilliseconds: Int? = nil,
+        market: String? = nil,
         mediaURI: String? = nil
     ) {
         self.provider = provider
         self.title = title
         self.artist = artist
+        self.albumTitle = albumTitle
+        self.durationMilliseconds = durationMilliseconds
+        self.market = market
         self.mediaURI = mediaURI
     }
 
@@ -121,6 +130,211 @@ public enum MediaPlaybackFailureDiagnosis {
     }
 }
 
+public struct SpotifyTrackCandidate: Equatable, Sendable {
+    public var uri: String
+    public var title: String
+    public var artists: [String]
+    public var albumTitle: String?
+    public var durationMilliseconds: Int?
+    public var availableMarkets: [String]
+
+    public init(
+        uri: String,
+        title: String,
+        artists: [String],
+        albumTitle: String? = nil,
+        durationMilliseconds: Int? = nil,
+        availableMarkets: [String] = []
+    ) {
+        self.uri = uri
+        self.title = title
+        self.artists = artists
+        self.albumTitle = albumTitle
+        self.durationMilliseconds = durationMilliseconds
+        self.availableMarkets = availableMarkets
+    }
+
+    public var artistDisplayName: String {
+        artists.joined(separator: ", ")
+    }
+}
+
+public struct SpotifyPlaybackDevice: Equatable, Sendable {
+    public var id: String
+    public var name: String
+    public var isActive: Bool
+    public var isTransferable: Bool
+
+    public init(
+        id: String,
+        name: String,
+        isActive: Bool,
+        isTransferable: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.isActive = isActive
+        self.isTransferable = isTransferable
+    }
+}
+
+public enum SpotifyProviderStatus: String, Codable, Equatable, Sendable {
+    case available
+    case outage
+    case rateLimited = "rate_limited"
+}
+
+public struct SpotifyPlaybackState: Equatable, Sendable {
+    public var isAuthorized: Bool
+    public var hasPremium: Bool
+    public var devices: [SpotifyPlaybackDevice]
+    public var candidates: [SpotifyTrackCandidate]
+    public var providerStatus: SpotifyProviderStatus
+
+    public init(
+        isAuthorized: Bool,
+        hasPremium: Bool,
+        devices: [SpotifyPlaybackDevice],
+        candidates: [SpotifyTrackCandidate],
+        providerStatus: SpotifyProviderStatus = .available
+    ) {
+        self.isAuthorized = isAuthorized
+        self.hasPremium = hasPremium
+        self.devices = devices
+        self.candidates = candidates
+        self.providerStatus = providerStatus
+    }
+}
+
+public enum SpotifyPlaybackAction: Equatable, Sendable {
+    case play(uri: String, deviceID: String)
+    case transferAndPlay(uri: String, deviceID: String)
+}
+
+public struct SpotifyPlaybackStart: Equatable, Sendable {
+    public var action: SpotifyPlaybackAction
+    public var track: SpotifyTrackCandidate
+    public var device: SpotifyPlaybackDevice
+
+    public init(action: SpotifyPlaybackAction, track: SpotifyTrackCandidate, device: SpotifyPlaybackDevice) {
+        self.action = action
+        self.track = track
+        self.device = device
+    }
+}
+
+public struct SpotifyPlaybackFailure: Equatable, Sendable {
+    public var blockers: MediaPlaybackBlockers
+    public var reason: MediaPlaybackFailureReason
+    public var detail: String
+    public var matchedTrack: SpotifyTrackCandidate?
+
+    public init(
+        blockers: MediaPlaybackBlockers,
+        detail: String,
+        matchedTrack: SpotifyTrackCandidate? = nil
+    ) {
+        self.blockers = blockers
+        self.reason = MediaPlaybackFailureDiagnosis.diagnose(blockers) ?? .providerOutage
+        self.detail = detail
+        self.matchedTrack = matchedTrack
+    }
+}
+
+public enum SpotifyPlaybackResult: Equatable, Sendable {
+    case started(SpotifyPlaybackStart)
+    case blocked(SpotifyPlaybackFailure)
+}
+
+@MainActor
+public protocol SpotifyPlaybackProviding {
+    func play(_ request: MediaPlaybackRequest) async -> SpotifyPlaybackResult
+}
+
+public struct UnavailableSpotifyPlaybackProvider: SpotifyPlaybackProviding {
+    public init() {}
+
+    public func play(_ request: MediaPlaybackRequest) async -> SpotifyPlaybackResult {
+        .blocked(
+            SpotifyPlaybackFailure(
+                blockers: MediaPlaybackBlockers(authorizationBlocked: true),
+                detail: "Spotify playback provider not configured."
+            )
+        )
+    }
+}
+
+public enum SpotifyPlaybackResolver {
+    public static func resolve(
+        request: MediaPlaybackRequest,
+        state: SpotifyPlaybackState
+    ) -> SpotifyPlaybackResult {
+        let matchedTrack = bestTrack(for: request, in: state.candidates)
+        let targetDevice = playbackDevice(in: state.devices)
+        let blockers = MediaPlaybackBlockers(
+            authorizationBlocked: !state.isAuthorized,
+            subscriptionBlocked: !state.hasPremium,
+            activeDeviceBlocked: targetDevice == nil,
+            catalogMatchBlocked: matchedTrack == nil,
+            providerOutageBlocked: state.providerStatus != .available
+        )
+
+        if MediaPlaybackFailureDiagnosis.diagnose(blockers) != nil {
+            return .blocked(
+                SpotifyPlaybackFailure(
+                    blockers: blockers,
+                    detail: failureDetail(for: state.providerStatus),
+                    matchedTrack: matchedTrack
+                )
+            )
+        }
+
+        guard let matchedTrack, let targetDevice else {
+            return .blocked(
+                SpotifyPlaybackFailure(
+                    blockers: MediaPlaybackBlockers(providerOutageBlocked: true),
+                    detail: "Spotify playback could not be resolved."
+                )
+            )
+        }
+
+        let action: SpotifyPlaybackAction = targetDevice.isActive
+            ? .play(uri: matchedTrack.uri, deviceID: targetDevice.id)
+            : .transferAndPlay(uri: matchedTrack.uri, deviceID: targetDevice.id)
+        return .started(SpotifyPlaybackStart(action: action, track: matchedTrack, device: targetDevice))
+    }
+
+    public static func bestTrack(
+        for request: MediaPlaybackRequest,
+        in candidates: [SpotifyTrackCandidate]
+    ) -> SpotifyTrackCandidate? {
+        MediaSearchMatcher.best(
+            in: candidates,
+            request: request,
+            title: \.title,
+            artist: { $0.artists.joined(separator: " ") },
+            albumTitle: \.albumTitle,
+            durationMilliseconds: \.durationMilliseconds,
+            availableMarkets: \.availableMarkets
+        )
+    }
+
+    private static func playbackDevice(in devices: [SpotifyPlaybackDevice]) -> SpotifyPlaybackDevice? {
+        devices.first(where: \.isActive) ?? devices.first(where: \.isTransferable)
+    }
+
+    private static func failureDetail(for providerStatus: SpotifyProviderStatus) -> String {
+        switch providerStatus {
+        case .available:
+            return "Spotify playback requirements were not met."
+        case .outage:
+            return "Spotify playback is currently unavailable."
+        case .rateLimited:
+            return "Spotify playback is currently rate-limited."
+        }
+    }
+}
+
 public enum MediaPlaybackError: Error, LocalizedError, Equatable {
     case missingProvider
     case missingTitle
@@ -221,25 +435,37 @@ public struct ITunesSearchAPIClient: AppleMusicCatalogSearching {
     }
 }
 
-private enum MediaSearchMatcher {
+enum MediaSearchMatcher {
     static func best<Candidate>(
         in candidates: [Candidate],
         request: MediaPlaybackRequest,
         title: (Candidate) -> String,
-        artist: (Candidate) -> String
+        artist: (Candidate) -> String,
+        albumTitle: ((Candidate) -> String?)? = nil,
+        durationMilliseconds: ((Candidate) -> Int?)? = nil,
+        availableMarkets: ((Candidate) -> [String])? = nil
     ) -> Candidate? {
         candidates
-            .compactMap { candidate -> (candidate: Candidate, score: Int)? in
+            .enumerated()
+            .compactMap { offset, candidate -> (candidate: Candidate, score: Int, offset: Int)? in
                 guard let score = score(
                     candidateTitle: title(candidate),
                     candidateArtist: artist(candidate),
+                    candidateAlbumTitle: albumTitle?(candidate),
+                    candidateDurationMilliseconds: durationMilliseconds?(candidate),
+                    candidateAvailableMarkets: availableMarkets?(candidate) ?? [],
                     request: request
                 ) else {
                     return nil
                 }
-                return (candidate, score)
+                return (candidate, score, offset)
             }
-            .sorted { $0.score > $1.score }
+            .sorted { first, second in
+                if first.score == second.score {
+                    return first.offset < second.offset
+                }
+                return first.score > second.score
+            }
             .first?
             .candidate
     }
@@ -247,6 +473,9 @@ private enum MediaSearchMatcher {
     private static func score(
         candidateTitle: String,
         candidateArtist: String,
+        candidateAlbumTitle: String?,
+        candidateDurationMilliseconds: Int?,
+        candidateAvailableMarkets: [String],
         request: MediaPlaybackRequest
     ) -> Int? {
         guard let titleScore = titleScore(candidateTitle: candidateTitle, requestedTitle: request.title) else {
@@ -264,7 +493,21 @@ private enum MediaSearchMatcher {
             matchedArtistScore = 0
         }
 
-        return titleScore + matchedArtistScore
+        guard let marketScore = marketScore(
+            candidateMarkets: candidateAvailableMarkets,
+            requestedMarket: request.market
+        ) else {
+            return nil
+        }
+
+        return titleScore +
+            matchedArtistScore +
+            albumScore(candidateAlbumTitle: candidateAlbumTitle, requestedAlbumTitle: request.albumTitle) +
+            durationScore(
+                candidateDurationMilliseconds: candidateDurationMilliseconds,
+                requestedDurationMilliseconds: request.durationMilliseconds
+            ) +
+            marketScore
     }
 
     private static func titleScore(candidateTitle: String, requestedTitle: String) -> Int? {
@@ -316,6 +559,81 @@ private enum MediaSearchMatcher {
             return nil
         }
         return 34
+    }
+
+    private static func albumScore(candidateAlbumTitle: String?, requestedAlbumTitle: String?) -> Int {
+        guard let candidateAlbumTitle,
+              let requestedAlbumTitle,
+              !requestedAlbumTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return 0
+        }
+
+        let candidate = normalize(candidateAlbumTitle)
+        let requested = normalize(requestedAlbumTitle)
+        guard !candidate.isEmpty, !requested.isEmpty else {
+            return 0
+        }
+
+        if candidate == requested {
+            return 32
+        }
+        if candidate.contains(requested) || requested.contains(candidate) {
+            return 24
+        }
+
+        let requestedTokens = tokens(requested)
+        let candidateTokens = Set(tokens(candidate))
+        guard !requestedTokens.isEmpty,
+              requestedTokens.allSatisfy({ candidateTokens.contains($0) }) else {
+            return -10
+        }
+        return 18
+    }
+
+    private static func durationScore(
+        candidateDurationMilliseconds: Int?,
+        requestedDurationMilliseconds: Int?
+    ) -> Int {
+        guard let candidateDurationMilliseconds,
+              let requestedDurationMilliseconds,
+              candidateDurationMilliseconds > 0,
+              requestedDurationMilliseconds > 0 else {
+            return 0
+        }
+
+        let difference = abs(candidateDurationMilliseconds - requestedDurationMilliseconds)
+        if difference <= 2_000 {
+            return 24
+        }
+        if difference <= 5_000 {
+            return 18
+        }
+        if difference <= 15_000 {
+            return 8
+        }
+        if difference > 30_000 {
+            return -16
+        }
+        return 0
+    }
+
+    private static func marketScore(candidateMarkets: [String], requestedMarket: String?) -> Int? {
+        guard let requestedMarket,
+              !requestedMarket.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return 0
+        }
+
+        let normalizedRequestedMarket = requestedMarket
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        let normalizedCandidateMarkets = Set(candidateMarkets.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }.filter { !$0.isEmpty })
+        guard !normalizedCandidateMarkets.isEmpty else {
+            return 0
+        }
+
+        return normalizedCandidateMarkets.contains(normalizedRequestedMarket) ? 20 : nil
     }
 
     private static func normalize(_ value: String) -> String {

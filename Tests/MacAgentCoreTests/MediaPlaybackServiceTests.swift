@@ -65,6 +65,177 @@ struct MediaPlaybackServiceTests {
     }
 
     @Test
+    func spotifyResolverStartsPlaybackForBestMatchingTrack() {
+        let request = spotifyRequest()
+        let result = SpotifyPlaybackResolver.resolve(
+            request: request,
+            state: spotifyState(
+                candidates: [
+                    spotifyTrack(
+                        uri: "spotify:track:wrong-market",
+                        title: "Jimmy Cooks",
+                        artists: ["Drake"],
+                        albumTitle: "Honestly, Nevermind",
+                        durationMilliseconds: 218_365,
+                        markets: ["GB"]
+                    ),
+                    spotifyTrack(
+                        uri: "spotify:track:wrong-album-duration",
+                        title: "Jimmy Cooks",
+                        artists: ["Drake"],
+                        albumTitle: "Scary Hours",
+                        durationMilliseconds: 260_000,
+                        markets: ["US"]
+                    ),
+                    spotifyTrack(
+                        uri: "spotify:track:best",
+                        title: "Jimmy Cooks (feat. 21 Savage)",
+                        artists: ["Drake", "21 Savage"],
+                        albumTitle: "Honestly, Nevermind",
+                        durationMilliseconds: 218_365,
+                        markets: ["US"]
+                    )
+                ]
+            )
+        )
+
+        guard case .started(let start) = result else {
+            Issue.record("Expected Spotify playback to start.")
+            return
+        }
+
+        #expect(start.track.uri == "spotify:track:best")
+        #expect(start.action == .play(uri: "spotify:track:best", deviceID: "mac"))
+    }
+
+    @Test
+    func spotifyResolverTransfersPlaybackWhenNeeded() {
+        let result = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(
+                devices: [spotifyDevice(isActive: false, isTransferable: true)],
+                candidates: [spotifyTrack()]
+            )
+        )
+
+        guard case .started(let start) = result else {
+            Issue.record("Expected Spotify playback to start after transfer.")
+            return
+        }
+
+        #expect(start.action == .transferAndPlay(uri: "spotify:track:best", deviceID: "mac"))
+    }
+
+    @Test
+    func unavailableSpotifyProviderFailsAsAuthorizationBlocker() async {
+        let result = await UnavailableSpotifyPlaybackProvider().play(spotifyRequest())
+
+        guard case .blocked(let failure) = result else {
+            Issue.record("Expected unavailable Spotify provider to block playback.")
+            return
+        }
+
+        #expect(failure.reason == .authorization)
+        #expect(failure.detail == "Spotify playback provider not configured.")
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(failure.blockers) == failure.reason)
+    }
+
+    @Test
+    func spotifyResolverDiagnosesMissingAuthorization() {
+        let result = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(isAuthorized: false, candidates: [spotifyTrack()])
+        )
+
+        assertSpotifyBlocked(result, reason: .authorization)
+    }
+
+    @Test
+    func spotifyResolverDiagnosesMissingPremium() {
+        let result = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(hasPremium: false, candidates: [spotifyTrack()])
+        )
+
+        assertSpotifyBlocked(result, reason: .subscriptionPremium)
+    }
+
+    @Test
+    func spotifyResolverDiagnosesMissingActiveDevice() {
+        let result = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(devices: [], candidates: [spotifyTrack()])
+        )
+
+        assertSpotifyBlocked(result, reason: .activeDevice)
+    }
+
+    @Test
+    func spotifyResolverDiagnosesCatalogMismatch() {
+        let result = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(
+                candidates: [
+                    spotifyTrack(
+                        uri: "spotify:track:wrong",
+                        title: "Wrong Song",
+                        artists: ["Drake"],
+                        albumTitle: "Honestly, Nevermind",
+                        durationMilliseconds: 218_365,
+                        markets: ["US"]
+                    )
+                ]
+            )
+        )
+
+        assertSpotifyBlocked(result, reason: .catalogMatch)
+    }
+
+    @Test
+    func spotifyResolverDiagnosesProviderOutageAndRateLimit() {
+        let outage = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(providerStatus: .outage, candidates: [spotifyTrack()])
+        )
+        let rateLimited = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(providerStatus: .rateLimited, candidates: [spotifyTrack()])
+        )
+
+        assertSpotifyBlocked(outage, reason: .providerOutage, detail: "Spotify playback is currently unavailable.")
+        assertSpotifyBlocked(rateLimited, reason: .providerOutage, detail: "Spotify playback is currently rate-limited.")
+    }
+
+    @Test
+    func spotifyResolverUsesFailureDiagnosisForMultiBlockerPrecedence() {
+        let result = SpotifyPlaybackResolver.resolve(
+            request: spotifyRequest(),
+            state: spotifyState(
+                isAuthorized: false,
+                hasPremium: false,
+                devices: [],
+                providerStatus: .rateLimited,
+                candidates: []
+            )
+        )
+
+        guard case .blocked(let failure) = result else {
+            Issue.record("Expected Spotify playback to be blocked.")
+            return
+        }
+
+        #expect(failure.blockers == MediaPlaybackBlockers(
+            authorizationBlocked: true,
+            subscriptionBlocked: true,
+            activeDeviceBlocked: true,
+            catalogMatchBlocked: true,
+            providerOutageBlocked: true
+        ))
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(failure.blockers) == .authorization)
+        #expect(failure.reason == .authorization)
+    }
+
+    @Test
     func iTunesSearchReturnsAppleMusicAlbumLink() async throws {
         AppleMusicFixtureURLProtocol.handler = { request in
             #expect(request.url?.path == "/search")
@@ -187,6 +358,80 @@ struct MediaPlaybackServiceTests {
         #expect(track?.title == "Father Stretch My Hands Pt. 1")
         #expect(track?.artist == "Kanye West")
         #expect(track?.trackID == 3)
+    }
+
+    private func spotifyRequest() -> MediaPlaybackRequest {
+        MediaPlaybackRequest(
+            provider: .spotify,
+            title: "Jimmy Cooks",
+            artist: "Drake",
+            albumTitle: "Honestly, Nevermind",
+            durationMilliseconds: 218_365,
+            market: "US"
+        )
+    }
+
+    private func spotifyState(
+        isAuthorized: Bool = true,
+        hasPremium: Bool = true,
+        devices: [SpotifyPlaybackDevice]? = nil,
+        providerStatus: SpotifyProviderStatus = .available,
+        candidates: [SpotifyTrackCandidate]
+    ) -> SpotifyPlaybackState {
+        SpotifyPlaybackState(
+            isAuthorized: isAuthorized,
+            hasPremium: hasPremium,
+            devices: devices ?? [spotifyDevice()],
+            candidates: candidates,
+            providerStatus: providerStatus
+        )
+    }
+
+    private func spotifyDevice(
+        id: String = "mac",
+        name: String = "Sonny Mac",
+        isActive: Bool = true,
+        isTransferable: Bool = true
+    ) -> SpotifyPlaybackDevice {
+        SpotifyPlaybackDevice(
+            id: id,
+            name: name,
+            isActive: isActive,
+            isTransferable: isTransferable
+        )
+    }
+
+    private func spotifyTrack(
+        uri: String = "spotify:track:best",
+        title: String = "Jimmy Cooks (feat. 21 Savage)",
+        artists: [String] = ["Drake", "21 Savage"],
+        albumTitle: String = "Honestly, Nevermind",
+        durationMilliseconds: Int = 218_365,
+        markets: [String] = ["US"]
+    ) -> SpotifyTrackCandidate {
+        SpotifyTrackCandidate(
+            uri: uri,
+            title: title,
+            artists: artists,
+            albumTitle: albumTitle,
+            durationMilliseconds: durationMilliseconds,
+            availableMarkets: markets
+        )
+    }
+
+    private func assertSpotifyBlocked(
+        _ result: SpotifyPlaybackResult,
+        reason: MediaPlaybackFailureReason,
+        detail: String = "Spotify playback requirements were not met."
+    ) {
+        guard case .blocked(let failure) = result else {
+            Issue.record("Expected Spotify playback to be blocked.")
+            return
+        }
+
+        #expect(failure.reason == reason)
+        #expect(failure.detail == detail)
+        #expect(MediaPlaybackFailureDiagnosis.diagnose(failure.blockers) == failure.reason)
     }
 }
 
