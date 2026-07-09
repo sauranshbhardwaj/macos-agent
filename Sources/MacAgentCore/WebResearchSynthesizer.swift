@@ -299,10 +299,14 @@ public protocol WebResearchSynthesizing {
 
 @MainActor
 public struct EnvironmentWebResearchSynthesizer: WebResearchSynthesizing {
-    public init() {}
+    private let usageRecorder: any TaskUsageRecording
+
+    public init(usageRecorder: any TaskUsageRecording = NoopTaskUsageRecorder.shared) {
+        self.usageRecorder = usageRecorder
+    }
 
     public func synthesize(prompt: WebResearchSynthesisPrompt) async throws -> WebResearchNote {
-        let synthesizer = try OpenAIWebResearchSynthesizer()
+        let synthesizer = try OpenAIWebResearchSynthesizer(usageRecorder: usageRecorder)
         return try await synthesizer.synthesize(prompt: prompt)
     }
 }
@@ -313,12 +317,14 @@ public final class OpenAIWebResearchSynthesizer: WebResearchSynthesizing {
     private let model: String
     private let endpoint: URL
     private let session: URLSession
+    private let usageRecorder: any TaskUsageRecording
 
     public init(
         apiKey: String? = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
         model: String = ProcessInfo.processInfo.environment["OPENAI_MODEL"] ?? "gpt-5.5",
         endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        usageRecorder: any TaskUsageRecording = NoopTaskUsageRecorder.shared
     ) throws {
         guard let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PlannerError.missingAPIKey
@@ -327,14 +333,17 @@ public final class OpenAIWebResearchSynthesizer: WebResearchSynthesizing {
         self.model = model
         self.endpoint = endpoint
         self.session = session
+        self.usageRecorder = usageRecorder
     }
 
     public func synthesize(prompt: WebResearchSynthesisPrompt) async throws -> WebResearchNote {
+        let requestBody = prompt.requestBody(model: model)
+        let requestData = try JSONSerialization.data(withJSONObject: requestBody)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: prompt.requestBody(model: model))
+        request.httpBody = requestData
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -346,7 +355,20 @@ public final class OpenAIWebResearchSynthesizer: WebResearchSynthesizing {
             throw PlannerError.badResponse(httpResponse.statusCode, body)
         }
 
-        let text = try OpenAIResponseParser.outputText(from: data)
+        let reportedUsage = try AIUsagePayloadParser.responsesUsage(from: data)
+        let outputTextResult = Result {
+            try OpenAIResponseParser.outputText(from: data)
+        }
+        usageRecorder.record(
+            AIUsageRecord.responses(
+                kind: .webResearchSynthesis,
+                model: model,
+                reportedUsage: reportedUsage,
+                estimatedInputText: String(data: requestData, encoding: .utf8) ?? prompt.systemText,
+                estimatedOutputText: (try? outputTextResult.get()) ?? ""
+            )
+        )
+        let text = try outputTextResult.get()
         return try WebResearchNoteDecoder.decodeStrict(from: text)
     }
 }

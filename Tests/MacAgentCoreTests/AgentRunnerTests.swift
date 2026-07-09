@@ -154,6 +154,88 @@ struct AgentRunnerTests {
     }
 
     @Test
+    func followUpCorrectionRefinesLargestFilesPlanAndStillRequiresApproval() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let originalFolder = root.appendingPathComponent("MacAgentDemo")
+        let correctedFolder = root.appendingPathComponent("MacAgentDocs")
+        try FileManager.default.createDirectory(at: originalFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: correctedFolder, withIntermediateDirectories: true)
+        try write("small", to: correctedFolder.appendingPathComponent("small.txt"))
+        try write(String(repeating: "x", count: 2048), to: correctedFolder.appendingPathComponent("large.txt"))
+        let output = root.appendingPathComponent("corrected-largest.zip")
+        let zipArchiver = RecordingZipArchiver()
+        let priorContext = PriorTaskContext(
+            command: "Find the 3 largest files in \(originalFolder.path) and zip them.",
+            plan: largestPlan(root: originalFolder, output: root.appendingPathComponent("original-largest.zip")),
+            outcome: PriorTaskOutcome(status: .completed, summary: "Created original-largest.zip."),
+            createdAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let planner = RecordingPlanner(plan: largestPlan(root: correctedFolder, output: output))
+        let runner = AgentRunner(
+            planner: planner,
+            executor: makeExecutor(root: root, zipArchiver: zipArchiver)
+        )
+
+        let command = "use \(correctedFolder.path) instead"
+        let prepared = try await runner.prepare(command: command, priorTaskContext: priorContext)
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(planner.receivedCommand == command)
+        #expect(planner.receivedPriorTaskContext == priorContext)
+        #expect(prepared.plan.steps.first?.inputPath == correctedFolder.path)
+        #expect(request.assessment.effectiveTier == .tier2)
+        #expect(request.requirement == .lightweightConfirmation)
+
+        do {
+            _ = try await runner.execute(prepared)
+            Issue.record("Expected corrected tier 2 plan to require approval.")
+        } catch RiskApprovalError.approvalRequired(let approvalRequest) {
+            #expect(approvalRequest.assessment.effectiveTier == .tier2)
+        } catch {
+            Issue.record("Expected approvalRequired, got \(error).")
+        }
+
+        #expect(zipArchiver.createdArchives.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+
+        _ = try await runner.execute(
+            prepared,
+            approvalDecision: .approved(request.assessment.effectiveTier),
+            confirmationMessage: "User approved corrected Tier 2 action"
+        )
+
+        #expect(zipArchiver.createdArchives == [output])
+        #expect(FileManager.default.fileExists(atPath: output.path))
+    }
+
+    @Test
+    func unrelatedCommandCanIgnoreEligiblePriorContextAndPrepareFreshPlan() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let originalFolder = root.appendingPathComponent("MacAgentDemo")
+        try FileManager.default.createDirectory(at: originalFolder, withIntermediateDirectories: true)
+        let priorContext = PriorTaskContext(
+            command: "Find the 3 largest files in \(originalFolder.path) and zip them.",
+            plan: largestPlan(root: originalFolder, output: root.appendingPathComponent("original-largest.zip")),
+            outcome: PriorTaskOutcome(status: .completed, summary: "Created original-largest.zip."),
+            createdAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let planner = RecordingPlanner(plan: openAppPlan(appName: "Safari"))
+        let runner = AgentRunner(
+            planner: planner,
+            executor: makeExecutor(root: root)
+        )
+
+        let prepared = try await runner.prepare(command: "Open Safari", priorTaskContext: priorContext)
+
+        #expect(planner.receivedPriorTaskContext == priorContext)
+        #expect(prepared.plan.steps.map(\.operation) == [.openApp])
+        #expect(prepared.plan.steps.first?.inputPath == nil)
+        #expect(prepared.plan.summary == "Open Safari.")
+    }
+
+    @Test
     func runnerRefusesTierFourBeforeExecutorExecution() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1055,8 +1137,25 @@ struct AgentRunnerTests {
 private struct StaticPlanner: Planning {
     var plan: AgentPlan
 
-    func plan(command: String) async throws -> AgentPlan {
+    func plan(command: String, priorTaskContext: PriorTaskContext?) async throws -> AgentPlan {
         plan
+    }
+}
+
+@MainActor
+private final class RecordingPlanner: Planning {
+    var plan: AgentPlan
+    private(set) var receivedCommand: String?
+    private(set) var receivedPriorTaskContext: PriorTaskContext?
+
+    init(plan: AgentPlan) {
+        self.plan = plan
+    }
+
+    func plan(command: String, priorTaskContext: PriorTaskContext?) async throws -> AgentPlan {
+        receivedCommand = command
+        receivedPriorTaskContext = priorTaskContext
+        return plan
     }
 }
 

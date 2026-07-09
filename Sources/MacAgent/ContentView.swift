@@ -126,6 +126,10 @@ struct ContentView: View {
                     viewModel.start()
                 }
 
+            if let recentTask = viewModel.recentTaskAffordanceText {
+                RecentTaskAffordance(text: recentTask)
+            }
+
             if !viewModel.voiceTranscript.isEmpty {
                 Label("Voice command received", systemImage: "waveform")
                     .font(SonnyType.caption)
@@ -182,6 +186,40 @@ struct ContentView: View {
             .buttonStyle(SonnyButtonStyle(tone: .primary, width: 92))
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct RecentTaskAffordance: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(SonnyType.icon(13))
+                .foregroundStyle(SonnyTheme.accent)
+                .frame(width: 16)
+
+            Text("Recent task")
+                .font(SonnyType.micro)
+                .foregroundStyle(SonnyTheme.text)
+
+            Text(text)
+                .font(SonnyType.micro)
+                .foregroundStyle(SonnyTheme.muted)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SonnyTheme.surfaceRaised.opacity(0.84))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(SonnyTheme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -635,6 +673,10 @@ private struct RunDetailsView: View {
                         LogPanel(logStore: logStore)
                     }
 
+                    if shouldShowUsageSummary {
+                        UsageSummaryBadge(summary: viewModel.taskUsageSummary)
+                    }
+
                     if !viewModel.finalSummary.isEmpty {
                         SummaryPanel(
                             summary: viewModel.finalSummary,
@@ -657,6 +699,14 @@ private struct RunDetailsView: View {
                 scrollToBottom(proxy)
             }
         }
+    }
+
+    private var shouldShowUsageSummary: Bool {
+        viewModel.taskUsageSummary.requestCount > 0
+            || viewModel.approvalRequest != nil
+            || viewModel.plan != nil
+            || !viewModel.previews.isEmpty
+            || !viewModel.finalSummary.isEmpty
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
@@ -902,6 +952,68 @@ private struct StartupCapabilities: View {
                 }
             }
         }
+    }
+}
+
+private struct UsageSummaryBadge: View {
+    let summary: TaskUsageSummary
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: "chart.bar")
+                .font(SonnyType.icon(13))
+                .foregroundStyle(SonnyTheme.accent)
+                .frame(width: 16)
+
+            Text(usageText)
+                .font(SonnyType.micro)
+                .foregroundStyle(SonnyTheme.muted)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(SonnyTheme.surfaceRaised.opacity(0.72))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(SonnyTheme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var usageText: String {
+        guard summary.requestCount > 0 else {
+            return "Local usage: no AI requests for this task."
+        }
+
+        var parts: [String] = [
+            "Local usage: \(summary.requestCount) AI request\(summary.requestCount == 1 ? "" : "s")"
+        ]
+
+        if summary.reportedTotalTokens > 0 {
+            parts.append("\(summary.reportedTotalTokens.formatted()) reported token\(summary.reportedTotalTokens == 1 ? "" : "s")")
+        }
+
+        if summary.estimatedTotalTokens > 0 {
+            parts.append("about \(summary.estimatedTotalTokens.formatted()) estimated token\(summary.estimatedTotalTokens == 1 ? "" : "s")")
+        }
+
+        if summary.audioDurationSeconds > 0 {
+            parts.append("\(formattedAudioDuration) audio")
+        }
+
+        return parts.joined(separator: ", ") + "."
+    }
+
+    private var formattedAudioDuration: String {
+        let value = summary.audioDurationSeconds
+        if value >= 10 {
+            return "\(Int(value.rounded()))s"
+        }
+        return String(format: "%.1fs", value)
     }
 }
 

@@ -2,7 +2,13 @@ import Foundation
 
 @MainActor
 public protocol Planning {
-    func plan(command: String) async throws -> AgentPlan
+    func plan(command: String, priorTaskContext: PriorTaskContext?) async throws -> AgentPlan
+}
+
+public extension Planning {
+    func plan(command: String) async throws -> AgentPlan {
+        try await plan(command: command, priorTaskContext: nil)
+    }
 }
 
 public enum PlannerError: Error, LocalizedError, Equatable {
@@ -29,13 +35,15 @@ public final class OpenAIPlanner: Planning {
     private let endpoint: URL
     private let session: URLSession
     private let toolRegistry: ToolRegistry
+    private let usageRecorder: any TaskUsageRecording
 
     public init(
         apiKey: String? = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
         model: String = ProcessInfo.processInfo.environment["OPENAI_MODEL"] ?? "gpt-5.5",
         endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
         session: URLSession = .shared,
-        toolRegistry: ToolRegistry = .default
+        toolRegistry: ToolRegistry = .default,
+        usageRecorder: any TaskUsageRecording = NoopTaskUsageRecorder.shared
     ) throws {
         guard let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PlannerError.missingAPIKey
@@ -45,14 +53,17 @@ public final class OpenAIPlanner: Planning {
         self.endpoint = endpoint
         self.session = session
         self.toolRegistry = toolRegistry
+        self.usageRecorder = usageRecorder
     }
 
-    public func plan(command: String) async throws -> AgentPlan {
+    public func plan(command: String, priorTaskContext: PriorTaskContext? = nil) async throws -> AgentPlan {
+        let requestBody = requestBody(command: command, priorTaskContext: priorTaskContext)
+        let requestData = try JSONSerialization.data(withJSONObject: requestBody)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody(command: command))
+        request.httpBody = requestData
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -64,39 +75,53 @@ public final class OpenAIPlanner: Planning {
             throw PlannerError.badResponse(httpResponse.statusCode, body)
         }
 
-        let text = try OpenAIResponseParser.outputText(from: data)
+        let reportedUsage = try AIUsagePayloadParser.responsesUsage(from: data)
+        let outputTextResult = Result {
+            try OpenAIResponseParser.outputText(from: data)
+        }
+        usageRecorder.record(
+            AIUsageRecord.responses(
+                kind: .planner,
+                model: model,
+                reportedUsage: reportedUsage,
+                estimatedInputText: String(data: requestData, encoding: .utf8) ?? command,
+                estimatedOutputText: (try? outputTextResult.get()) ?? ""
+            )
+        )
+        let text = try outputTextResult.get()
         return try AgentPlanDecoder.decodeStrict(from: text)
     }
 
-    private func requestBody(command: String) -> [String: Any] {
-        [
+    private func requestBody(command: String, priorTaskContext: PriorTaskContext?) -> [String: Any] {
+        var input = [
+            Self.message(role: "system", text: Self.systemPrompt(toolRegistry: toolRegistry))
+        ]
+        if let priorTaskContext {
+            input.append(Self.message(role: "user", text: priorTaskContext.plannerContextText))
+        }
+        input.append(Self.message(role: "user", text: command))
+
+        return [
             "model": model,
-            "input": [
-                [
-                    "role": "system",
-                    "content": [
-                        [
-                            "type": "input_text",
-                            "text": Self.systemPrompt(toolRegistry: toolRegistry)
-                        ]
-                    ]
-                ],
-                [
-                    "role": "user",
-                    "content": [
-                        [
-                            "type": "input_text",
-                            "text": command
-                        ]
-                    ]
-                ]
-            ],
+            "input": input,
             "reasoning": [
                 "effort": "medium"
             ],
             "text": [
                 "verbosity": "low",
                 "format": AgentPlanSchema.responseFormat()
+            ]
+        ]
+    }
+
+    private static func message(role: String, text: String) -> [String: Any] {
+        [
+            "role": role,
+            "content": [
+                [
+                    "type": "input_text",
+                    "text": text
+                ]
             ]
         ]
     }
@@ -112,6 +137,13 @@ public final class OpenAIPlanner: Planning {
     - Use only the fixed operation enum values.
     - Use registered tools only. Do not invent tools, commands, scripts, or APIs.
     - Include user-supplied paths exactly as written. Do not invent local file paths.
+    - A TRUSTED_PRIOR_TASK_CONTEXT_BEGIN/END message may appear before the current command. It is Sonny's short-lived record of only the immediately preceding task.
+    - The user may provide a short correction such as "use ~/Documents instead", "try /tmp instead", "no, scan ~/Documents instead", or "use 5 instead".
+    - When prior task context is present and the current command is a correction/refinement phrase that does not name a complete new action, reuse the prior task's exact action(s), operation(s), count(s), output intent, and safety/risk-relevant behavior. Replace only the field(s) the user explicitly changed, such as folder/path, URL, app, count, query, provider, or output path.
+    - If prior plan summary or steps are unavailable because the prior task failed before preparation completed, infer the prior action from Previous command and Previous outcome, then apply the user's correction to that same action.
+    - Do not invent a different task category or unrelated candidate operation from a short correction phrase. For example, after a largest-files task, "use ~/Documents instead" means run the same largest-files task against ~/Documents; it does not mean search for documents, convert DOCX files, or ask which operation to perform.
+    - If the new command is a complete standalone task, or it clearly conflicts with the prior task rather than refining it, ignore prior task context and plan the new command normally.
+    - Ask a clarification question only when both the prior task and the correction text still leave the replacement field or required action unresolved. Do not ask for clarification merely because the correction phrase is short.
     - Use null for unavailable fields.
     - If a folder, app name, URL, count, or output destination is required but missing or ambiguous, return exactly one clarify step with a short question.
     - For largest files, produce scan_select_largest_files then create_zip.

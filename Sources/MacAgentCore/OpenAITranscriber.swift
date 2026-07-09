@@ -22,9 +22,11 @@ public enum TranscriptionError: Error, LocalizedError, Equatable {
 
 public struct TranscriptionResult: Equatable, Sendable {
     public var text: String
+    public var usage: AIUsageRecord?
 
-    public init(text: String) {
+    public init(text: String, usage: AIUsageRecord? = nil) {
         self.text = text
+        self.usage = usage
     }
 }
 
@@ -33,12 +35,14 @@ public struct OpenAITranscriber: Sendable {
     private let model: String
     private let endpoint: URL
     private let session: URLSession
+    private let usageRecorder: any TaskUsageRecording
 
     public init(
         apiKey: String? = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
         model: String = ProcessInfo.processInfo.environment["OPENAI_TRANSCRIBE_MODEL"] ?? "gpt-4o-mini-transcribe",
         endpoint: URL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        usageRecorder: any TaskUsageRecording = NoopTaskUsageRecorder.shared
     ) throws {
         guard let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TranscriptionError.missingAPIKey
@@ -47,6 +51,7 @@ public struct OpenAITranscriber: Sendable {
         self.model = model
         self.endpoint = endpoint
         self.session = session
+        self.usageRecorder = usageRecorder
     }
 
     public func transcribe(audioFileURL: URL) async throws -> TranscriptionResult {
@@ -81,7 +86,17 @@ public struct OpenAITranscriber: Sendable {
         guard !text.isEmpty else {
             throw TranscriptionError.missingText
         }
-        return TranscriptionResult(text: text)
+        let usage = (try? AIUsagePayloadParser.transcriptionUsage(from: data)).map { parsedUsage in
+            AIUsageRecord(
+                kind: .transcription,
+                model: model,
+                tokenSource: parsedUsage.tokenSource,
+                tokenCounts: parsedUsage.tokenCounts,
+                audioDurationSeconds: parsedUsage.audioDurationSeconds
+            )
+        } ?? AIUsageRecord(kind: .transcription, model: model)
+        usageRecorder.record(usage)
+        return TranscriptionResult(text: text, usage: usage)
     }
 
     private static func multipartBody(

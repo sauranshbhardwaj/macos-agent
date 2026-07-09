@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import MacAgentCore
 
-@Suite
+@Suite(.serialized)
 struct OpenAITranscriberTests {
     @Test
     func transcribesFixtureResponse() async throws {
@@ -25,21 +25,69 @@ struct OpenAITranscriberTests {
                 httpVersion: nil,
                 headerFields: nil
             )!
-            return (response, Data(#"{"text":"Open Safari"}"#.utf8))
+            return (response, Data(#"{"text":"Open Safari","usage":{"type":"tokens","input_tokens":12,"output_tokens":4,"total_tokens":16}}"#.utf8))
         }
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FixtureURLProtocol.self]
         let session = URLSession(configuration: configuration)
+        let recorder = TaskUsageRecorder()
         let transcriber = try OpenAITranscriber(
             apiKey: "test-key",
             endpoint: URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
-            session: session
+            session: session,
+            usageRecorder: recorder
         )
 
         let result = try await transcriber.transcribe(audioFileURL: audioURL)
 
         #expect(result.text == "Open Safari")
+        #expect(result.usage?.tokenSource == .reported)
+        #expect(result.usage?.tokenCounts.totalTokens == 16)
+        let summary = recorder.snapshot()
+        #expect(summary.requestCount == 1)
+        #expect(summary.reportedInputTokens == 12)
+        #expect(summary.reportedOutputTokens == 4)
+        #expect(summary.reportedTotalTokens == 16)
+    }
+
+    @Test
+    func transcribesFixtureResponseWithDurationUsage() async throws {
+        let audioURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("macagent-transcriber-duration-test-\(UUID().uuidString).m4a")
+        try Data("fake-audio".utf8).write(to: audioURL)
+        defer { try? FileManager.default.removeItem(at: audioURL) }
+
+        FixtureURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(#"{"text":"Open Notes","usage":{"type":"duration","seconds":2.5}}"#.utf8))
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FixtureURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let recorder = TaskUsageRecorder()
+        let transcriber = try OpenAITranscriber(
+            apiKey: "test-key",
+            endpoint: URL(string: "https://api.openai.com/v1/audio/transcriptions")!,
+            session: session,
+            usageRecorder: recorder
+        )
+
+        let result = try await transcriber.transcribe(audioFileURL: audioURL)
+
+        #expect(result.text == "Open Notes")
+        #expect(result.usage?.tokenSource == nil)
+        #expect(result.usage?.audioDurationSeconds == 2.5)
+        let summary = recorder.snapshot()
+        #expect(summary.requestCount == 1)
+        #expect(summary.reportedTotalTokens == 0)
+        #expect(summary.audioDurationSeconds == 2.5)
     }
 }
 

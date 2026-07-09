@@ -167,7 +167,7 @@ struct SnippetExpansionTests {
 }
 
 private struct FailingPlanner: Planning {
-    func plan(command: String) async throws -> AgentPlan {
+    func plan(command: String, priorTaskContext: PriorTaskContext?) async throws -> AgentPlan {
         Issue.record("Planner should not be called for snippet instant commands.")
         throw PlannerError.missingAPIKey
     }

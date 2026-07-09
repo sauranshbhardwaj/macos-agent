@@ -64,6 +64,7 @@ public final class AgentActionExecutor {
     private let webPageLoader: PublicWebPageLoader
     private let webSearchProvider: any WebSearchProviding
     private let webResearchSynthesizer: any WebResearchSynthesizing
+    private let usageRecorder: any TaskUsageRecording
     private let clipboardHistoryStore: ClipboardHistoryStore
     private let snippetStore: SnippetStore
     private let runningAppSwitcher: any RunningAppSwitching
@@ -96,6 +97,7 @@ public final class AgentActionExecutor {
         webPageLoader: PublicWebPageLoader? = nil,
         webSearchProvider: (any WebSearchProviding)? = nil,
         webResearchSynthesizer: (any WebResearchSynthesizing)? = nil,
+        usageRecorder: any TaskUsageRecording = NoopTaskUsageRecorder.shared,
         clipboardHistoryStore: ClipboardHistoryStore = ClipboardHistoryStore(),
         snippetStore: SnippetStore = SnippetStore(),
         runningAppSwitcher: any RunningAppSwitching = WorkspaceRunningAppSwitcher(),
@@ -126,7 +128,10 @@ public final class AgentActionExecutor {
         self.workspaceStore = workspaceStore
         self.webPageLoader = webPageLoader ?? PublicWebPageLoader.live()
         self.webSearchProvider = webSearchProvider ?? UnavailableWebSearchProvider()
-        self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer()
+        self.usageRecorder = usageRecorder
+        self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer(
+            usageRecorder: usageRecorder
+        )
         self.clipboardHistoryStore = clipboardHistoryStore
         self.snippetStore = snippetStore
         self.runningAppSwitcher = runningAppSwitcher

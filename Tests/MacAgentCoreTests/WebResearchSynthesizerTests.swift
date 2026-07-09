@@ -63,6 +63,61 @@ struct WebResearchSynthesizerTests {
     }
 
     @Test
+    @MainActor
+    func openAIWebResearchSynthesizerRecordsReportedResponsesUsage() async throws {
+        WebResearchFixtureURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(Self.noteResponseWithUsageJSON.utf8))
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebResearchFixtureURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let recorder = TaskUsageRecorder()
+        let synthesizer = try OpenAIWebResearchSynthesizer(
+            apiKey: "test-key",
+            model: "test-model",
+            endpoint: URL(string: "https://api.openai.com/v1/responses")!,
+            session: session,
+            usageRecorder: recorder
+        )
+        let prompt = WebResearchSynthesisPrompt(
+            trustedPlan: AgentPlan(
+                summary: "Summarize article.",
+                requiresConfirmation: true,
+                steps: [
+                    AgentStep(
+                        id: "web",
+                        operation: .webToMarkdown,
+                        description: "Summarize article.",
+                        targetURL: "https://example.com/article"
+                    )
+                ]
+            ),
+            systemText: "System",
+            trustedUserInstructionText: "Summarize.",
+            observedContentTexts: ["Observed text."]
+        )
+
+        let note = try await synthesizer.synthesize(prompt: prompt)
+
+        #expect(note.title == "Fixture Note")
+        let summary = recorder.snapshot()
+        #expect(summary.requestCount == 1)
+        #expect(summary.reportedInputTokens == 80)
+        #expect(summary.reportedOutputTokens == 25)
+        #expect(summary.reportedTotalTokens == 105)
+        #expect(summary.records.first?.kind == .webResearchSynthesis)
+        #expect(summary.records.first?.model == "test-model")
+        #expect(summary.records.first?.tokenSource == .reported)
+    }
+
+    @Test
     func redTeamObservedContentCannotChangeTrustedAgentPlanOrInstructionMessage() throws {
         let trustedPlan = AgentPlan(
             summary: "Summarize the article and save Markdown.",
@@ -179,4 +234,46 @@ struct WebResearchSynthesizerTests {
         let first = try #require(content.first)
         return try #require(first["text"] as? String)
     }
+
+    private static let noteResponseWithUsageJSON = #"""
+    {
+      "id": "resp_web",
+      "output_text": "{\"title\":\"Fixture Note\",\"summary\":\"Short summary.\",\"keyPoints\":[\"One\"],\"citations\":[\"Citation\"],\"sources\":[{\"title\":\"Example\",\"url\":\"https://example.com/article\",\"retrievedAt\":\"2026-07-09T12:00:00Z\"}]}",
+      "usage": {
+        "input_tokens": 80,
+        "output_tokens": 25,
+        "total_tokens": 105
+      }
+    }
+    """#
+}
+
+private final class WebResearchFixtureURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: PlannerError.missingOutputText)
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
