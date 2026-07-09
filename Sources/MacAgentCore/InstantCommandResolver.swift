@@ -8,13 +8,19 @@ public enum InstantCommandResolution: Equatable, Sendable {
 public struct InstantCommandResolver: Sendable {
     private let snippetStore: SnippetStore
     private let recentArtifactStore: RecentArtifactStore
+    private let routineStore: RoutineStore
+    private let workspaceStore: WorkspaceStore
 
     public init(
         snippetStore: SnippetStore = SnippetStore(),
-        recentArtifactStore: RecentArtifactStore = RecentArtifactStore()
+        recentArtifactStore: RecentArtifactStore = RecentArtifactStore(),
+        routineStore: RoutineStore = RoutineStore(),
+        workspaceStore: WorkspaceStore = WorkspaceStore()
     ) {
         self.snippetStore = snippetStore
         self.recentArtifactStore = recentArtifactStore
+        self.routineStore = routineStore
+        self.workspaceStore = workspaceStore
     }
 
     public func resolve(command rawCommand: String) -> InstantCommandResolution? {
@@ -32,6 +38,10 @@ public struct InstantCommandResolver: Sendable {
 
         if let query = prefixedClipboardHistoryQuery(in: command) {
             return .plan(clipboardHistoryPlan(query: query))
+        }
+
+        if let quickDispatch = quickDispatchResolution(in: command) {
+            return quickDispatch
         }
 
         if let query = prefixedRunningAppQuery(in: command) {
@@ -64,6 +74,99 @@ public struct InstantCommandResolver: Sendable {
     private enum RecentArtifactRequest {
         case lookup(String?)
         case open(String?)
+    }
+
+    private func quickDispatchResolution(in command: String) -> InstantCommandResolution? {
+        if let routine = savedRoutine(matching: explicitRoutineCandidates(in: command)) {
+            return .plan(runRoutinePlan(routine))
+        }
+
+        if let workspace = savedWorkspace(matching: explicitWorkspaceCandidates(in: command)) {
+            return .plan(openWorkspacePlan(workspace))
+        }
+
+        let routine = savedRoutine(matching: [command])
+        let workspace = savedWorkspace(matching: [command])
+        switch (routine, workspace) {
+        case (.some(let routine), nil):
+            return .plan(runRoutinePlan(routine))
+        case (nil, .some(let workspace)):
+            return .plan(openWorkspacePlan(workspace))
+        case (.some(let routine), .some(let workspace)):
+            return .clarify(quickDispatchClarificationPlan(name: routine.name, workspaceName: workspace.name))
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private func explicitRoutineCandidates(in command: String) -> [String] {
+        launchCandidates(
+            in: command,
+            kind: "routine",
+            directPrefixes: ["run", "start", "launch"],
+            kindPrefixes: ["run routine", "start routine", "launch routine", "routine"]
+        )
+    }
+
+    private func explicitWorkspaceCandidates(in command: String) -> [String] {
+        launchCandidates(
+            in: command,
+            kind: "workspace",
+            directPrefixes: ["open", "start", "launch"],
+            kindPrefixes: ["open workspace", "start workspace", "launch workspace", "workspace"]
+        )
+    }
+
+    private func launchCandidates(
+        in command: String,
+        kind: String,
+        directPrefixes: [String],
+        kindPrefixes: [String]
+    ) -> [String] {
+        let lowered = command.lowercased()
+        var candidates: [String] = []
+
+        for prefix in kindPrefixes {
+            if lowered.hasPrefix("\(prefix) ") {
+                candidates.append(String(command.dropFirst(prefix.count)))
+            }
+        }
+
+        for prefix in directPrefixes {
+            if lowered.hasPrefix("\(prefix) ") {
+                let remainder = String(command.dropFirst(prefix.count))
+                candidates.append(remainder)
+                if remainder.lowercased().hasSuffix(" \(kind)") {
+                    candidates.append(String(remainder.dropLast(kind.count + 1)))
+                }
+            }
+        }
+
+        return uniqueLaunchCandidates(candidates.flatMap { [$0, strippedLaunchArticle($0)] })
+    }
+
+    private func savedRoutine(matching candidates: [String]) -> StoredRoutine? {
+        guard let routines = try? routineStore.loadAll() else {
+            return nil
+        }
+        for candidate in candidates {
+            if let routine = routines[normalizedLaunchName(candidate)] {
+                return routine
+            }
+        }
+        return nil
+    }
+
+    private func savedWorkspace(matching candidates: [String]) -> StoredWorkspace? {
+        guard let workspaces = try? workspaceStore.loadAll() else {
+            return nil
+        }
+        for candidate in candidates {
+            if let workspace = workspaces[normalizedLaunchName(candidate)] {
+                return workspace
+            }
+        }
+        return nil
     }
 
     private func prefixedRunningAppQuery(in command: String) -> String? {
@@ -259,6 +362,36 @@ public struct InstantCommandResolver: Sendable {
         )
     }
 
+    private func runRoutinePlan(_ routine: StoredRoutine) -> AgentPlan {
+        AgentPlan(
+            summary: "Run routine \(routine.name).",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "run-routine",
+                    operation: .runRoutine,
+                    description: "Run saved routine \(routine.name).",
+                    routineName: routine.name
+                )
+            ]
+        )
+    }
+
+    private func openWorkspacePlan(_ workspace: StoredWorkspace) -> AgentPlan {
+        AgentPlan(
+            summary: "Open workspace \(workspace.name).",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "open-workspace",
+                    operation: .openWorkspace,
+                    description: "Open saved workspace \(workspace.name).",
+                    workspaceName: workspace.name
+                )
+            ]
+        )
+    }
+
     private func snippetPlan(_ snippet: StoredSnippet) -> AgentPlan {
         AgentPlan(
             summary: "Expand snippet \(snippet.trigger).",
@@ -269,6 +402,21 @@ public struct InstantCommandResolver: Sendable {
                     operation: .expandSnippet,
                     description: "Expand snippet \(snippet.trigger).",
                     searchQuery: snippet.trigger
+                )
+            ]
+        )
+    }
+
+    private func quickDispatchClarificationPlan(name: String, workspaceName: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Clarification needed.",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "clarify-quick-dispatch",
+                    operation: .clarify,
+                    description: "Ask whether to run a routine or open a workspace.",
+                    question: "I found both a routine named \(name) and a workspace named \(workspaceName). Which should I launch?"
                 )
             ]
         )
@@ -323,5 +471,37 @@ public struct InstantCommandResolver: Sendable {
                 )
             ]
         )
+    }
+
+    private func strippedLaunchArticle(_ candidate: String) -> String {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        for article in ["my ", "the "] where trimmed.lowercased().hasPrefix(article) {
+            return String(trimmed.dropFirst(article.count))
+        }
+        return trimmed
+    }
+
+    private func normalizedLaunchName(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .lowercased()
+    }
+
+    private func uniqueLaunchCandidates(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for value in values {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                continue
+            }
+            let key = normalizedLaunchName(trimmed)
+            guard seen.insert(key).inserted else {
+                continue
+            }
+            result.append(trimmed)
+        }
+        return result
     }
 }
