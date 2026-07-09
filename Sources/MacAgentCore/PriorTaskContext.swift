@@ -38,6 +38,20 @@ public struct PriorTaskContext: Codable, Equatable, Sendable {
         )
     }
 
+    public init(
+        command: String,
+        outcome: PriorTaskOutcome,
+        createdAt: Date
+    ) {
+        self.init(
+            previousCommand: command.trimmingCharacters(in: .whitespacesAndNewlines),
+            planSummary: "",
+            steps: [],
+            outcome: outcome,
+            createdAt: createdAt
+        )
+    }
+
     public func isExpired(
         at now: Date,
         expirationInterval: TimeInterval = Self.defaultExpirationInterval
@@ -59,12 +73,19 @@ public struct PriorTaskContext: Codable, Equatable, Sendable {
             "\(index + 1). \(step.plannerText)"
         }
 
+        let planSummaryText = planSummary.isEmpty
+            ? "- unavailable; prior task failed before preparation completed"
+            : Self.escapeForPlanner(planSummary)
+        let stepsText = stepLines.isEmpty
+            ? "- none available; prior task failed before preparation completed"
+            : stepLines.joined(separator: "\n")
+
         return """
         TRUSTED_PRIOR_TASK_CONTEXT_BEGIN
         Previous command: \(Self.escapeForPlanner(previousCommand))
-        Previous plan summary: \(Self.escapeForPlanner(planSummary))
+        Previous plan summary: \(planSummaryText)
         Previous plan steps:
-        \(stepLines.isEmpty ? "- none" : stepLines.joined(separator: "\n"))
+        \(stepsText)
         Previous outcome: \(outcome.plannerText)
         Captured at: \(formatter.string(from: createdAt))
         TRUSTED_PRIOR_TASK_CONTEXT_END
@@ -189,6 +210,14 @@ public final class PriorTaskContextStore {
         storedContext = PriorTaskContext(
             command: command,
             plan: plan,
+            outcome: outcome,
+            createdAt: now()
+        )
+    }
+
+    public func record(command: String, outcome: PriorTaskOutcome) {
+        storedContext = PriorTaskContext(
+            command: command,
             outcome: outcome,
             createdAt: now()
         )

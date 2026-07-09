@@ -322,6 +322,12 @@ final class AgentViewModel: ObservableObject {
                     status: .failed,
                     summary: error.localizedDescription
                 )
+            } else {
+                recordPriorTaskContext(
+                    command: submittedCommand,
+                    status: .failed,
+                    summary: error.localizedDescription
+                )
             }
         }
     }
@@ -778,6 +784,18 @@ final class AgentViewModel: ObservableObject {
         priorTaskContextStore.record(
             command: command,
             plan: preparedRun.plan,
+            outcome: PriorTaskOutcome(status: status, summary: summary)
+        )
+        priorTaskContext = priorTaskContextStore.currentContext()
+    }
+
+    private func recordPriorTaskContext(
+        command: String,
+        status: PriorTaskOutcomeStatus,
+        summary: String
+    ) {
+        priorTaskContextStore.record(
+            command: command,
             outcome: PriorTaskOutcome(status: status, summary: summary)
         )
         priorTaskContext = priorTaskContextStore.currentContext()

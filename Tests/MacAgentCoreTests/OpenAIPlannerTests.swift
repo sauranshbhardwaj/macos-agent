@@ -111,6 +111,46 @@ struct OpenAIPlannerTests {
         #expect(Self.messageText(input[2]) == "use ~/Documents/MacAgentDocs instead")
     }
 
+    @Test
+    func prepareFailurePriorTaskContextIsSentAsSeparatePlannerMessage() async throws {
+        PlannerFixtureURLProtocol.handler = { request in
+            PlannerFixtureURLProtocol.capturedBody = try request.bodyData()
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(Self.openAppResponseJSON.utf8))
+        }
+
+        let planner = try OpenAIPlanner(
+            apiKey: "test-key",
+            endpoint: URL(string: "https://api.openai.com/v1/responses")!,
+            session: Self.fixtureSession()
+        )
+        let context = PriorTaskContext(
+            command: "find the 3 largest files in ~/Desktop/SomeFolder",
+            outcome: PriorTaskOutcome(status: .failed, summary: "The folder ~/Desktop/SomeFolder could not be scanned."),
+            createdAt: Date(timeIntervalSince1970: 2_000)
+        )
+
+        _ = try await planner.plan(
+            command: "use ~/Documents instead",
+            priorTaskContext: context
+        )
+
+        let body = try #require(PlannerFixtureURLProtocol.capturedBody)
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let input = try #require(object["input"] as? [[String: Any]])
+        #expect(input.count == 3)
+        let contextText = try #require(Self.messageText(input[1]))
+        #expect(contextText.contains("Previous command: find the 3 largest files in ~/Desktop/SomeFolder"))
+        #expect(contextText.contains("Previous plan summary: - unavailable; prior task failed before preparation completed"))
+        #expect(contextText.contains("Previous outcome: failed - The folder ~/Desktop/SomeFolder could not be scanned."))
+        #expect(Self.messageText(input[2]) == "use ~/Documents instead")
+    }
+
     private static func messageText(_ message: [String: Any]) -> String? {
         guard let content = message["content"] as? [[String: Any]],
               let first = content.first else {
