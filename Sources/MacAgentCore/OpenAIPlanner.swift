@@ -35,13 +35,15 @@ public final class OpenAIPlanner: Planning {
     private let endpoint: URL
     private let session: URLSession
     private let toolRegistry: ToolRegistry
+    private let usageRecorder: any TaskUsageRecording
 
     public init(
         apiKey: String? = ProcessInfo.processInfo.environment["OPENAI_API_KEY"],
         model: String = ProcessInfo.processInfo.environment["OPENAI_MODEL"] ?? "gpt-5.5",
         endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
         session: URLSession = .shared,
-        toolRegistry: ToolRegistry = .default
+        toolRegistry: ToolRegistry = .default,
+        usageRecorder: any TaskUsageRecording = NoopTaskUsageRecorder.shared
     ) throws {
         guard let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PlannerError.missingAPIKey
@@ -51,16 +53,17 @@ public final class OpenAIPlanner: Planning {
         self.endpoint = endpoint
         self.session = session
         self.toolRegistry = toolRegistry
+        self.usageRecorder = usageRecorder
     }
 
     public func plan(command: String, priorTaskContext: PriorTaskContext? = nil) async throws -> AgentPlan {
+        let requestBody = requestBody(command: command, priorTaskContext: priorTaskContext)
+        let requestData = try JSONSerialization.data(withJSONObject: requestBody)
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(
-            withJSONObject: requestBody(command: command, priorTaskContext: priorTaskContext)
-        )
+        request.httpBody = requestData
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -72,7 +75,20 @@ public final class OpenAIPlanner: Planning {
             throw PlannerError.badResponse(httpResponse.statusCode, body)
         }
 
-        let text = try OpenAIResponseParser.outputText(from: data)
+        let reportedUsage = try AIUsagePayloadParser.responsesUsage(from: data)
+        let outputTextResult = Result {
+            try OpenAIResponseParser.outputText(from: data)
+        }
+        usageRecorder.record(
+            AIUsageRecord.responses(
+                kind: .planner,
+                model: model,
+                reportedUsage: reportedUsage,
+                estimatedInputText: String(data: requestData, encoding: .utf8) ?? command,
+                estimatedOutputText: (try? outputTextResult.get()) ?? ""
+            )
+        )
+        let text = try outputTextResult.get()
         return try AgentPlanDecoder.decodeStrict(from: text)
     }
 

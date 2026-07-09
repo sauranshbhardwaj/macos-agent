@@ -58,9 +58,10 @@ struct InstantCommandResolverTests {
         }
 
         let logStore = AgentLogStore()
+        let usageRecorder = TaskUsageRecorder()
         let runner = AgentRunner(
             planner: FailingPlanner(),
-            executor: AgentActionExecutor(),
+            executor: AgentActionExecutor(usageRecorder: usageRecorder),
             logStore: logStore
         )
 
@@ -74,6 +75,7 @@ struct InstantCommandResolverTests {
 
         let result = try await runner.execute(prepared, confirmationMessage: "Instant calculator auto-run")
         #expect(result.summary == "2 + 2 * 3 = 8.")
+        #expect(usageRecorder.snapshot().requestCount == 0)
         #expect(logStore.events.contains { $0.phase == .plan && $0.message == "Resolved command locally" })
         #expect(logStore.events.contains { $0.phase == .risk && $0.message.contains("risk.assessed: Tier 0") })
     }

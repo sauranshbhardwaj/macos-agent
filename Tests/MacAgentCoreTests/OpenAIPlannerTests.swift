@@ -2,9 +2,73 @@ import Foundation
 import Testing
 @testable import MacAgentCore
 
-@Suite
+@Suite(.serialized)
 @MainActor
 struct OpenAIPlannerTests {
+    @Test
+    func plannerRecordsReportedResponsesUsage() async throws {
+        PlannerFixtureURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(Self.openAppResponseWithUsageJSON.utf8))
+        }
+
+        let recorder = TaskUsageRecorder()
+        let planner = try OpenAIPlanner(
+            apiKey: "test-key",
+            endpoint: URL(string: "https://api.openai.com/v1/responses")!,
+            session: Self.fixtureSession(),
+            usageRecorder: recorder
+        )
+
+        _ = try await planner.plan(command: "Open Safari")
+
+        let summary = recorder.snapshot()
+        #expect(summary.requestCount == 1)
+        #expect(summary.reportedInputTokens == 42)
+        #expect(summary.reportedOutputTokens == 18)
+        #expect(summary.reportedTotalTokens == 60)
+        #expect(summary.estimatedTotalTokens == 0)
+        #expect(summary.records.first?.kind == .planner)
+        #expect(summary.records.first?.tokenSource == .reported)
+    }
+
+    @Test
+    func plannerEstimatesResponsesUsageWhenUsageIsNull() async throws {
+        PlannerFixtureURLProtocol.handler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data(Self.openAppResponseWithNullUsageJSON.utf8))
+        }
+
+        let recorder = TaskUsageRecorder()
+        let planner = try OpenAIPlanner(
+            apiKey: "test-key",
+            endpoint: URL(string: "https://api.openai.com/v1/responses")!,
+            session: Self.fixtureSession(),
+            usageRecorder: recorder
+        )
+
+        _ = try await planner.plan(command: "Open Safari")
+
+        let summary = recorder.snapshot()
+        #expect(summary.requestCount == 1)
+        #expect(summary.reportedTotalTokens == 0)
+        #expect(summary.estimatedInputTokens > 0)
+        #expect(summary.estimatedOutputTokens > 0)
+        #expect(summary.estimatedTotalTokens == summary.estimatedInputTokens + summary.estimatedOutputTokens)
+        #expect(summary.hasEstimatedTokens)
+        #expect(summary.records.first?.tokenSource == .estimated)
+    }
+
     @Test
     func priorTaskContextIsSentAsSeparatePlannerMessage() async throws {
         PlannerFixtureURLProtocol.handler = { request in
@@ -55,6 +119,12 @@ struct OpenAIPlannerTests {
         return first["text"] as? String
     }
 
+    private static func fixtureSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PlannerFixtureURLProtocol.self]
+        return URLSession(configuration: configuration)
+    }
+
     private static func largestPlan() -> AgentPlan {
         AgentPlan(
             summary: "Zip largest files.",
@@ -83,6 +153,26 @@ struct OpenAIPlannerTests {
     {
       "id": "resp_123",
       "output_text": "{\"summary\":\"Open Safari.\",\"requiresConfirmation\":false,\"steps\":[{\"id\":\"open\",\"operation\":\"open_app\",\"description\":\"Open Safari.\",\"inputPath\":null,\"outputPath\":null,\"count\":null,\"targetURL\":null,\"appName\":\"Safari\",\"question\":null,\"mediaProvider\":null,\"mediaTitle\":null,\"mediaArtist\":null,\"contextSource\":null,\"routineName\":null,\"routineSteps\":null,\"workspaceName\":null,\"workspaceApps\":null,\"workspaceURLs\":null,\"sourceURLs\":null,\"searchQuery\":null,\"draftTitle\":null,\"draftContent\":null,\"shortcutName\":null,\"shortcutInput\":null}]}"
+    }
+    """#
+
+    private static let openAppResponseWithUsageJSON = #"""
+    {
+      "id": "resp_123",
+      "output_text": "{\"summary\":\"Open Safari.\",\"requiresConfirmation\":false,\"steps\":[{\"id\":\"open\",\"operation\":\"open_app\",\"description\":\"Open Safari.\",\"inputPath\":null,\"outputPath\":null,\"count\":null,\"targetURL\":null,\"appName\":\"Safari\",\"question\":null,\"mediaProvider\":null,\"mediaTitle\":null,\"mediaArtist\":null,\"contextSource\":null,\"routineName\":null,\"routineSteps\":null,\"workspaceName\":null,\"workspaceApps\":null,\"workspaceURLs\":null,\"sourceURLs\":null,\"searchQuery\":null,\"draftTitle\":null,\"draftContent\":null,\"shortcutName\":null,\"shortcutInput\":null}]}",
+      "usage": {
+        "input_tokens": 42,
+        "output_tokens": 18,
+        "total_tokens": 60
+      }
+    }
+    """#
+
+    private static let openAppResponseWithNullUsageJSON = #"""
+    {
+      "id": "resp_123",
+      "output_text": "{\"summary\":\"Open Safari.\",\"requiresConfirmation\":false,\"steps\":[{\"id\":\"open\",\"operation\":\"open_app\",\"description\":\"Open Safari.\",\"inputPath\":null,\"outputPath\":null,\"count\":null,\"targetURL\":null,\"appName\":\"Safari\",\"question\":null,\"mediaProvider\":null,\"mediaTitle\":null,\"mediaArtist\":null,\"contextSource\":null,\"routineName\":null,\"routineSteps\":null,\"workspaceName\":null,\"workspaceApps\":null,\"workspaceURLs\":null,\"sourceURLs\":null,\"searchQuery\":null,\"draftTitle\":null,\"draftContent\":null,\"shortcutName\":null,\"shortcutInput\":null}]}",
+      "usage": null
     }
     """#
 }

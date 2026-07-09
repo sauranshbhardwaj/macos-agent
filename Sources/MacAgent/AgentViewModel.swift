@@ -29,6 +29,7 @@ final class AgentViewModel: ObservableObject {
     @Published var showClipboardHistoryNotice: Bool = false
     @Published var clipboardHistoryEnabled: Bool = true
     @Published var priorTaskContext: PriorTaskContext?
+    @Published var taskUsageSummary: TaskUsageSummary = .empty
 
     let logStore = AgentLogStore()
 
@@ -46,10 +47,12 @@ final class AgentViewModel: ObservableObject {
     private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
     private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
     private let priorTaskContextStore = PriorTaskContextStore()
+    private let taskUsageRecorder = TaskUsageRecorder()
     private var clipboardHistoryTimer: Timer?
     private var clarificationAutoExecute = false
     private var isPushToTalkHotKeyDown = false
     private var pendingCommandForPriorTaskContext: String?
+    private var preserveUsageForNextStart = false
 
     private enum VoiceRecordingTrigger {
         case button
@@ -160,7 +163,16 @@ final class AgentViewModel: ObservableObject {
         approvalRequest = nil
         stepStatuses = [:]
 
+        if preserveUsageForNextStart {
+            preserveUsageForNextStart = false
+            publishTaskUsageSummary()
+        } else {
+            taskUsageRecorder.reset()
+            taskUsageSummary = .empty
+        }
+
         defer {
+            publishTaskUsageSummary()
             isRunning = false
             currentTask = nil
         }
@@ -186,7 +198,7 @@ final class AgentViewModel: ObservableObject {
                     prepared = try runner.prepare(plan: localPlan, source: .instantResolver)
                 }
             } else {
-                let planner = try OpenAIPlanner()
+                let planner = try OpenAIPlanner(usageRecorder: taskUsageRecorder)
                 runner = AgentRunner(
                     planner: planner,
                     executor: executor,
@@ -498,6 +510,7 @@ final class AgentViewModel: ObservableObject {
         suggestions = []
         stepStatuses = [:]
         priorTaskContext = nil
+        taskUsageSummary = .empty
         voiceTranscript = ""
         isPreparingVoiceRecording = false
         isRecordingVoice = false
@@ -510,7 +523,9 @@ final class AgentViewModel: ObservableObject {
         preparedRun = nil
         runner = nil
         pendingCommandForPriorTaskContext = nil
+        preserveUsageForNextStart = false
         priorTaskContextStore.clear()
+        taskUsageRecorder.reset()
         logStore.reset()
     }
 
@@ -549,6 +564,7 @@ final class AgentViewModel: ObservableObject {
         AgentActionExecutor(
             routineStore: routineStore,
             workspaceStore: workspaceStore,
+            usageRecorder: taskUsageRecorder,
             snippetStore: snippetStore,
             recentArtifactStore: recentArtifactStore,
             shortcutCatalog: shortcutCatalog,
@@ -617,21 +633,25 @@ final class AgentViewModel: ObservableObject {
         }
 
         Task {
+            taskUsageRecorder.reset()
+            taskUsageSummary = .empty
             isTranscribingVoice = true
             errorMessage = nil
             logStore.append(.act, "Transcribing voice command")
             defer {
+                publishTaskUsageSummary()
                 try? FileManager.default.removeItem(at: audioURL)
             }
 
             do {
-                let transcriber = try OpenAITranscriber()
+                let transcriber = try OpenAITranscriber(usageRecorder: taskUsageRecorder)
                 let result = try await transcriber.transcribe(audioFileURL: audioURL)
                 command = result.text
                 voiceTranscript = result.text
                 dryRun = false
                 finalSummary = ""
                 isTranscribingVoice = false
+                preserveUsageForNextStart = true
                 logStore.append(.observe, "Transcript ready. Sonny will act now.")
                 start(autoExecute: true)
             } catch {
@@ -682,6 +702,7 @@ final class AgentViewModel: ObservableObject {
         self.approvalRequest = nil
 
         defer {
+            publishTaskUsageSummary()
             isRunning = false
             currentTask = nil
         }
@@ -760,6 +781,10 @@ final class AgentViewModel: ObservableObject {
             outcome: PriorTaskOutcome(status: status, summary: summary)
         )
         priorTaskContext = priorTaskContextStore.currentContext()
+    }
+
+    private func publishTaskUsageSummary() {
+        taskUsageSummary = taskUsageRecorder.snapshot()
     }
 
     private func initializeStepStatuses(for plan: AgentPlan) {
