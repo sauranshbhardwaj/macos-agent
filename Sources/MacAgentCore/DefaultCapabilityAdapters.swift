@@ -13,6 +13,7 @@ public enum DefaultCapabilityAdapters {
             CreateLocalDraftCapabilityAdapter(),
             CalculatorCapabilityAdapter(),
             ClipboardHistoryCapabilityAdapter(),
+            SnippetExpansionCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),
             FinderSelectionCapabilityAdapter(),
             RevealInFinderCapabilityAdapter(),

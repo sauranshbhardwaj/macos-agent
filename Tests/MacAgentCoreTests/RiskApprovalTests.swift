@@ -90,6 +90,7 @@ struct RiskApprovalTests {
             "local.finder.read-selection": .tier0,
             "local.instant.calculator": .tier0,
             "local.instant.clipboard-history": .tier0,
+            "local.instant.snippet-expansion": .tier0,
             "local.apps.open-allowlisted-app": .tier1,
             "local.browser.open-app-search-url": .tier1,
             "local.browser.open-url": .tier1,

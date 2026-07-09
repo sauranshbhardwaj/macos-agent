@@ -23,6 +23,7 @@ struct ToolRegistryTests {
         #expect(registry.plannerDescription.contains("Apple Music"))
         #expect(!registry.plannerDescription.contains("calculate_utility"))
         #expect(!registry.plannerDescription.contains("lookup_clipboard_history"))
+        #expect(!registry.plannerDescription.contains("expand_snippet"))
     }
 
     @Test

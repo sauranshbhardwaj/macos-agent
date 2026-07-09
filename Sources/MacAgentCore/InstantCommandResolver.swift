@@ -6,7 +6,11 @@ public enum InstantCommandResolution: Equatable, Sendable {
 }
 
 public struct InstantCommandResolver: Sendable {
-    public init() {}
+    private let snippetStore: SnippetStore
+
+    public init(snippetStore: SnippetStore = SnippetStore()) {
+        self.snippetStore = snippetStore
+    }
 
     public func resolve(command rawCommand: String) -> InstantCommandResolution? {
         let command = rawCommand.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -23,6 +27,10 @@ public struct InstantCommandResolver: Sendable {
 
         if let query = prefixedClipboardHistoryQuery(in: command) {
             return .plan(clipboardHistoryPlan(query: query))
+        }
+
+        if let snippet = try? snippetStore.findExactTrigger(command) {
+            return .plan(snippetPlan(snippet))
         }
 
         if looksLikeBareArithmetic(command) || looksLikeBareConversion(command) {
@@ -119,6 +127,21 @@ public struct InstantCommandResolver: Sendable {
                     description: summary,
                     count: 10,
                     searchQuery: query?.isEmpty == true ? nil : query
+                )
+            ]
+        )
+    }
+
+    private func snippetPlan(_ snippet: StoredSnippet) -> AgentPlan {
+        AgentPlan(
+            summary: "Expand snippet \(snippet.trigger).",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "snippet-expansion",
+                    operation: .expandSnippet,
+                    description: "Expand snippet \(snippet.trigger).",
+                    searchQuery: snippet.trigger
                 )
             ]
         )
