@@ -43,6 +43,7 @@ struct PlannerBoundaryTests {
         - For running a saved routine, produce one run_routine step with routineName.
         - For creating a workspace, produce one create_workspace step with workspaceName, workspaceApps, and workspaceURLs. Use only explicitly named apps/URLs. If none are provided, ask a clarification question.
         - For opening a saved workspace, produce one open_workspace step with workspaceName.
+        - For running an existing Apple Shortcut, produce one invoke_shortcut step with shortcutName and optional shortcutInput when simple text input was explicitly supplied.
         - You may produce multi-step chained plans when the user asks for multiple supported actions. Keep steps in execution order.
         - For any unsupported request, return one unsupported step and explain why.
         - Never include shell commands, AppleScript, or code.
@@ -93,13 +94,22 @@ struct PlannerBoundaryTests {
             "sourceURLs",
             "searchQuery",
             "draftTitle",
-            "draftContent"
+            "draftContent",
+            "shortcutName",
+            "shortcutInput"
         ])
 
         let stepProperties = try #require(stepItems["properties"] as? [String: Any])
         let operation = try #require(stepProperties["operation"] as? [String: Any])
         #expect(operation["type"] as? String == "string")
-        #expect(operation["enum"] as? [String] == AgentOperation.allCases.map(\.rawValue))
+        #expect(operation["enum"] as? [String] == AgentOperation.plannerVisibleCases.map(\.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.calculateUtility.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.lookupClipboardHistory.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.expandSnippet.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.saveSnippet.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.switchRunningApp.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.lookupRecentArtifacts.rawValue))
+        #expect((operation["enum"] as? [String] ?? []).contains(AgentOperation.invokeShortcut.rawValue))
 
         let routineSteps = try #require(stepProperties["routineSteps"] as? [String: Any])
         #expect(routineSteps["type"] as? [String] == ["array", "null"])
@@ -237,6 +247,12 @@ private let expectedDefaultPlannerDescription = """
   side effects: open apps, open browser
   dry run: Show apps and URLs that would open.
   examples: Open my research workspace | Start research mode
+- invoke_shortcut: Invoke Shortcut
+  description: Run an existing named Apple Shortcut. Use shortcutInput only for simple text input explicitly supplied by the user.
+  required fields: shortcutName
+  side effects: run Shortcut
+  dry run: Show the Shortcut name and input without running it.
+  examples: Run my Morning Routine shortcut | Run shortcut Resize Image with input ~/Desktop/photo.png
 - clarify: Ask clarification
   description: Ask a short question when a required folder, app, count, or output destination is missing or ambiguous.
   required fields: question

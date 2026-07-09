@@ -88,6 +88,12 @@ struct RiskApprovalTests {
         let expected: [String: CapabilityRiskTier] = [
             "local.permissions.readiness": .tier0,
             "local.finder.read-selection": .tier0,
+            "local.instant.calculator": .tier0,
+            "local.instant.clipboard-history": .tier0,
+            "local.instant.snippet-expansion": .tier0,
+            "local.instant.recent-artifacts": .tier0,
+            "local.instant.running-app-switch": .tier1,
+            "local.instant.snippet-save": .tier2,
             "local.apps.open-allowlisted-app": .tier1,
             "local.browser.open-app-search-url": .tier1,
             "local.browser.open-url": .tier1,
@@ -101,7 +107,8 @@ struct RiskApprovalTests {
             "local.web.research-markdown": .tier2,
             "local.routines.save": .tier2,
             "local.routines.run": .tier2,
-            "local.workspaces.create": .tier2
+            "local.workspaces.create": .tier2,
+            "local.shortcuts.invoke": .tier2
         ]
 
         for (capabilityID, tier) in expected {

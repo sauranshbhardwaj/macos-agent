@@ -56,7 +56,7 @@ public enum AutomationStoreError: Error, LocalizedError, Equatable {
     }
 }
 
-public struct RoutineStore {
+public struct RoutineStore: @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
 
@@ -102,7 +102,7 @@ public struct RoutineStore {
     }
 }
 
-public struct WorkspaceStore {
+public struct WorkspaceStore: @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
 

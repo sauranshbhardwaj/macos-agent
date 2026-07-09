@@ -47,6 +47,18 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .openGeneratedArtifact) is OpenGeneratedArtifactCapabilityAdapter)
         #expect(try registry.adapter(for: .createLocalDraft).metadata.id == "local.files.create-local-draft")
         #expect(try registry.adapter(for: .createLocalDraft) is CreateLocalDraftCapabilityAdapter)
+        #expect(try registry.adapter(for: .calculateUtility).metadata.id == "local.instant.calculator")
+        #expect(try registry.adapter(for: .calculateUtility) is CalculatorCapabilityAdapter)
+        #expect(try registry.adapter(for: .lookupClipboardHistory).metadata.id == "local.instant.clipboard-history")
+        #expect(try registry.adapter(for: .lookupClipboardHistory) is ClipboardHistoryCapabilityAdapter)
+        #expect(try registry.adapter(for: .saveSnippet).metadata.id == "local.instant.snippet-save")
+        #expect(try registry.adapter(for: .saveSnippet) is SnippetSaveCapabilityAdapter)
+        #expect(try registry.adapter(for: .expandSnippet).metadata.id == "local.instant.snippet-expansion")
+        #expect(try registry.adapter(for: .expandSnippet) is SnippetExpansionCapabilityAdapter)
+        #expect(try registry.adapter(for: .switchRunningApp).metadata.id == "local.instant.running-app-switch")
+        #expect(try registry.adapter(for: .switchRunningApp) is RunningAppSwitchCapabilityAdapter)
+        #expect(try registry.adapter(for: .lookupRecentArtifacts).metadata.id == "local.instant.recent-artifacts")
+        #expect(try registry.adapter(for: .lookupRecentArtifacts) is RecentArtifactsCapabilityAdapter)
         #expect(try registry.adapter(for: .playMedia).metadata.id == "local.media.open-result")
         #expect(try registry.adapter(for: .playMedia) is OpenMediaResultCapabilityAdapter)
         #expect(try registry.adapter(for: .getFinderSelection).metadata.id == "local.finder.read-selection")
@@ -63,6 +75,8 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .createWorkspace) is CreateWorkspaceCapabilityAdapter)
         #expect(try registry.adapter(for: .openWorkspace).metadata.id == "local.workspaces.open")
         #expect(try registry.adapter(for: .openWorkspace) is OpenWorkspaceCapabilityAdapter)
+        #expect(try registry.adapter(for: .invokeShortcut).metadata.id == "local.shortcuts.invoke")
+        #expect(try registry.adapter(for: .invokeShortcut) is InvokeShortcutCapabilityAdapter)
         #expect(throws: CapabilityRegistryError.unsupportedOperation(.unsupported)) {
             _ = try registry.adapter(for: .unsupported)
         }
@@ -76,10 +90,13 @@ struct CapabilityRegistryTests {
             #expect(!metadata.description.isEmpty)
             #expect(metadata.version == "1.0")
             #expect(!metadata.operations.isEmpty)
-            #expect(!metadata.plannerTools.isEmpty)
             #expect(metadata.executorLocation == .localMac)
             #expect(CapabilityRiskTier.allCases.contains(metadata.defaultRiskTier))
-            #expect(metadata.operations.map(\.rawValue).sorted() == metadata.plannerTools.map(\.operation.rawValue).sorted())
+            if metadata.plannerTools.isEmpty {
+                #expect(metadata.id.hasPrefix("local.instant."))
+            } else {
+                #expect(metadata.operations.map(\.rawValue).sorted() == metadata.plannerTools.map(\.operation.rawValue).sorted())
+            }
 
             for tool in metadata.plannerTools {
                 #expect(!tool.name.isEmpty)

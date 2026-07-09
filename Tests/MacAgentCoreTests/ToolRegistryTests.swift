@@ -13,14 +13,22 @@ struct ToolRegistryTests {
         #expect(operations.contains(.openURL))
         #expect(operations.contains(.webToMarkdown))
         #expect(operations.contains(.playMedia))
+        #expect(operations.contains(.invokeShortcut))
         #expect(operations.contains(.clarify))
         #expect(registry.plannerDescription.contains("open_app"))
         #expect(registry.plannerDescription.contains("open_url"))
         #expect(registry.plannerDescription.contains("web_to_markdown"))
         #expect(registry.plannerDescription.contains("play_media"))
+        #expect(registry.plannerDescription.contains("invoke_shortcut"))
         #expect(registry.plannerDescription.contains("Play Jimmy Cooks by Drake on Apple Music"))
         #expect(registry.plannerDescription.contains("Spotify"))
         #expect(registry.plannerDescription.contains("Apple Music"))
+        #expect(!registry.plannerDescription.contains("calculate_utility"))
+        #expect(!registry.plannerDescription.contains("lookup_clipboard_history"))
+        #expect(!registry.plannerDescription.contains("expand_snippet"))
+        #expect(!registry.plannerDescription.contains("save_snippet"))
+        #expect(!registry.plannerDescription.contains("switch_running_app"))
+        #expect(!registry.plannerDescription.contains("lookup_recent_artifacts"))
     }
 
     @Test

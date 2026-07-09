@@ -11,6 +11,12 @@ public enum DefaultCapabilityAdapters {
             OpenSafeURLCapabilityAdapter(),
             OpenGeneratedArtifactCapabilityAdapter(),
             CreateLocalDraftCapabilityAdapter(),
+            CalculatorCapabilityAdapter(),
+            ClipboardHistoryCapabilityAdapter(),
+            SnippetSaveCapabilityAdapter(),
+            SnippetExpansionCapabilityAdapter(),
+            RunningAppSwitchCapabilityAdapter(),
+            RecentArtifactsCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),
             FinderSelectionCapabilityAdapter(),
             RevealInFinderCapabilityAdapter(),
@@ -19,6 +25,7 @@ public enum DefaultCapabilityAdapters {
             RunRoutineCapabilityAdapter(),
             CreateWorkspaceCapabilityAdapter(),
             OpenWorkspaceCapabilityAdapter(),
+            InvokeShortcutCapabilityAdapter(),
             MetadataOnlyCapabilityAdapter(metadata: clarify)
         ]
     }

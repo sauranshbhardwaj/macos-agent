@@ -1,0 +1,219 @@
+import Foundation
+import Testing
+@testable import MacAgentCore
+
+@Suite
+@MainActor
+struct QuickDispatchTests {
+    @Test
+    func resolverBuildsQuickRoutineAndWorkspacePlansForKnownSavedNames() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        let workspaceStore = WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+        try routineStore.save(StoredRoutine(name: "Morning Setup", steps: [openSafariStep()]))
+        try workspaceStore.save(StoredWorkspace(name: "Research", apps: ["Safari"], urls: ["https://github.com"]))
+        let resolver = InstantCommandResolver(routineStore: routineStore, workspaceStore: workspaceStore)
+
+        guard case .plan(let routinePlan) = resolver.resolve(command: "run morning setup") else {
+            Issue.record("Expected saved routine launch to resolve locally.")
+            return
+        }
+        #expect(routinePlan.steps.map(\.operation) == [.runRoutine])
+        #expect(routinePlan.steps[0].routineName == "Morning Setup")
+
+        guard case .plan(let workspacePlan) = resolver.resolve(command: "open research workspace") else {
+            Issue.record("Expected saved workspace launch to resolve locally.")
+            return
+        }
+        #expect(workspacePlan.steps.map(\.operation) == [.openWorkspace])
+        #expect(workspacePlan.steps[0].workspaceName == "Research")
+
+        #expect(resolver.resolve(command: "run missing setup") == nil)
+    }
+
+    @Test
+    func instantRoutineWithTierTwoNestedStepStillRequiresApproval() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("draft.md")
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        try routineStore.save(StoredRoutine(name: "Draft Routine", steps: [draftStep(output: output)]))
+        let resolver = InstantCommandResolver(routineStore: routineStore)
+        guard case .plan(let plan) = resolver.resolve(command: "run draft routine") else {
+            Issue.record("Expected saved routine launch to resolve locally.")
+            return
+        }
+        let runner = AgentRunner(
+            planner: FailingPlanner(),
+            executor: makeExecutor(root: root, routineStore: routineStore)
+        )
+
+        let prepared = try runner.prepare(plan: plan, source: .instantResolver)
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.effectiveTier == .tier2)
+        #expect(request.requirement == .lightweightConfirmation)
+        #expect(request.requirement != .autoRun)
+
+        do {
+            _ = try await runner.execute(prepared)
+            Issue.record("Expected instant routine launch to pause for tier 2 approval.")
+        } catch RiskApprovalError.approvalRequired(let approvalRequest) {
+            #expect(approvalRequest.requirement == .lightweightConfirmation)
+            #expect(approvalRequest.assessment.effectiveTier == .tier2)
+        } catch {
+            Issue.record("Expected approvalRequired, got \(error).")
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: output.path))
+    }
+
+    @Test
+    func instantRoutineWithTierThreeNestedEscalationRequiresExplicitApproval() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let output = root.appendingPathComponent("existing-draft.md")
+        try Data("original".utf8).write(to: output)
+        let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"))
+        try routineStore.save(StoredRoutine(name: "Overwrite Draft", steps: [draftStep(output: output)]))
+        let resolver = InstantCommandResolver(routineStore: routineStore)
+        guard case .plan(let plan) = resolver.resolve(command: "Overwrite Draft") else {
+            Issue.record("Expected exact saved routine name to resolve locally.")
+            return
+        }
+        let runner = AgentRunner(
+            planner: FailingPlanner(),
+            executor: makeExecutor(root: root, routineStore: routineStore)
+        )
+
+        let prepared = try runner.prepare(plan: plan, source: .instantResolver)
+        let request = try runner.approvalRequest(for: prepared)
+
+        #expect(request.assessment.effectiveTier == .tier3)
+        #expect(request.requirement == .explicitApproval)
+        #expect(request.requirement != .autoRun)
+
+        do {
+            _ = try await runner.execute(prepared)
+            Issue.record("Expected instant routine launch to pause for explicit tier 3 approval.")
+        } catch RiskApprovalError.approvalRequired(let approvalRequest) {
+            #expect(approvalRequest.requirement == .explicitApproval)
+            #expect(approvalRequest.assessment.effectiveTier == .tier3)
+        } catch {
+            Issue.record("Expected approvalRequired, got \(error).")
+        }
+
+        #expect(try String(contentsOf: output, encoding: .utf8) == "original")
+    }
+
+    @Test
+    func instantWorkspaceTierOneLaunchAutoRuns() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let workspaceStore = WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+        try workspaceStore.save(StoredWorkspace(name: "Research", apps: ["Safari"], urls: ["https://github.com"]))
+        let resolver = InstantCommandResolver(workspaceStore: workspaceStore)
+        guard case .plan(let plan) = resolver.resolve(command: "open my research workspace") else {
+            Issue.record("Expected saved workspace launch to resolve locally.")
+            return
+        }
+        let appOpener = RecordingAppOpener()
+        let browserOpener = RecordingBrowserOpener()
+        let runner = AgentRunner(
+            planner: FailingPlanner(),
+            executor: makeExecutor(
+                root: root,
+                browserOpener: browserOpener,
+                appOpener: appOpener,
+                workspaceStore: workspaceStore
+            )
+        )
+
+        let prepared = try runner.prepare(plan: plan, source: .instantResolver)
+        let request = try runner.approvalRequest(for: prepared)
+        let result = try await runner.execute(prepared)
+
+        #expect(request.assessment.effectiveTier == .tier1)
+        #expect(request.requirement == .autoRun)
+        #expect(appOpener.openedBundleIDs == ["com.apple.Safari"])
+        #expect(browserOpener.openedURLs.map(\.absoluteString) == ["https://github.com"])
+        #expect(result.summary == "Opened workspace Research with 1 app(s) and 1 URL(s).")
+    }
+
+    private func makeDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("QuickDispatchTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func makeExecutor(
+        root: URL,
+        browserOpener: BrowserOpening = NoopBrowserOpener(),
+        appOpener: AppOpening = NoopAppOpener(),
+        routineStore: RoutineStore? = nil,
+        workspaceStore: WorkspaceStore? = nil
+    ) -> AgentActionExecutor {
+        AgentActionExecutor(
+            whitelist: PathWhitelist(roots: [root]),
+            browserOpener: browserOpener,
+            appOpener: appOpener,
+            routineStore: routineStore ?? RoutineStore(fileURL: root.appendingPathComponent("routines.json")),
+            workspaceStore: workspaceStore ?? WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"))
+        )
+    }
+
+    private func openSafariStep() -> AgentStep {
+        AgentStep(
+            id: "open-safari",
+            operation: .openApp,
+            description: "Open Safari.",
+            appName: "Safari"
+        )
+    }
+
+    private func draftStep(output: URL) -> AgentStep {
+        AgentStep(
+            id: "create-draft",
+            operation: .createLocalDraft,
+            description: "Create draft.",
+            outputPath: output.path,
+            draftTitle: "Draft",
+            draftContent: "Draft body."
+        )
+    }
+}
+
+private struct FailingPlanner: Planning {
+    func plan(command: String) async throws -> AgentPlan {
+        Issue.record("Planner should not be called for quick routine/workspace dispatch.")
+        throw PlannerError.missingAPIKey
+    }
+}
+
+private struct NoopBrowserOpener: BrowserOpening {
+    func open(_ url: URL) async throws {}
+}
+
+@MainActor
+private final class RecordingBrowserOpener: BrowserOpening {
+    private(set) var openedURLs: [URL] = []
+
+    func open(_ url: URL) async throws {
+        openedURLs.append(url)
+    }
+}
+
+private struct NoopAppOpener: AppOpening {
+    func open(bundleIdentifier: String) async throws {}
+}
+
+@MainActor
+private final class RecordingAppOpener: AppOpening {
+    private(set) var openedBundleIDs: [String] = []
+
+    func open(bundleIdentifier: String) async throws {
+        openedBundleIDs.append(bundleIdentifier)
+    }
+}

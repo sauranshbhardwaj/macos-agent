@@ -64,6 +64,13 @@ public final class AgentActionExecutor {
     private let webPageLoader: PublicWebPageLoader
     private let webSearchProvider: any WebSearchProviding
     private let webResearchSynthesizer: any WebResearchSynthesizing
+    private let clipboardHistoryStore: ClipboardHistoryStore
+    private let snippetStore: SnippetStore
+    private let runningAppSwitcher: any RunningAppSwitching
+    private let recentArtifactStore: RecentArtifactStore
+    private let shortcutCatalog: any ShortcutCatalogProviding
+    private let shortcutInvoker: any ShortcutInvoking
+    private let shortcutRunHistoryStore: ShortcutRunHistoryStore
     private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
     private let now: () -> Date
@@ -89,6 +96,13 @@ public final class AgentActionExecutor {
         webPageLoader: PublicWebPageLoader? = nil,
         webSearchProvider: (any WebSearchProviding)? = nil,
         webResearchSynthesizer: (any WebResearchSynthesizing)? = nil,
+        clipboardHistoryStore: ClipboardHistoryStore = ClipboardHistoryStore(),
+        snippetStore: SnippetStore = SnippetStore(),
+        runningAppSwitcher: any RunningAppSwitching = WorkspaceRunningAppSwitcher(),
+        recentArtifactStore: RecentArtifactStore = RecentArtifactStore(),
+        shortcutCatalog: any ShortcutCatalogProviding = ProcessShortcutCatalog(),
+        shortcutInvoker: any ShortcutInvoking = ProcessShortcutInvoker(),
+        shortcutRunHistoryStore: ShortcutRunHistoryStore = ShortcutRunHistoryStore(),
         capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -113,6 +127,13 @@ public final class AgentActionExecutor {
         self.webPageLoader = webPageLoader ?? PublicWebPageLoader.live()
         self.webSearchProvider = webSearchProvider ?? UnavailableWebSearchProvider()
         self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer()
+        self.clipboardHistoryStore = clipboardHistoryStore
+        self.snippetStore = snippetStore
+        self.runningAppSwitcher = runningAppSwitcher
+        self.recentArtifactStore = recentArtifactStore
+        self.shortcutCatalog = shortcutCatalog
+        self.shortcutInvoker = shortcutInvoker
+        self.shortcutRunHistoryStore = shortcutRunHistoryStore
         self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
         self.now = now
@@ -128,6 +149,13 @@ public final class AgentActionExecutor {
         }
 
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
+        if let question = try clarificationQuestion(in: resolvedPlan) {
+            let preview = ActionPreview(
+                title: "Clarification needed",
+                details: [question]
+            )
+            return PreparedAgentRun(plan: resolvedPlan, previews: [preview], clarificationQuestion: question)
+        }
         let previews = try preview(plan: resolvedPlan)
         return PreparedAgentRun(plan: resolvedPlan, previews: previews)
     }
@@ -180,6 +208,18 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .openGeneratedArtifact, plan: plan)
         case .createLocalDraft:
             return try previewCapability(for: .createLocalDraft, plan: plan)
+        case .calculator:
+            return try previewCapability(for: .calculateUtility, plan: plan)
+        case .clipboardHistory:
+            return try previewCapability(for: .lookupClipboardHistory, plan: plan)
+        case .snippetSave:
+            return try previewCapability(for: .saveSnippet, plan: plan)
+        case .snippetExpansion:
+            return try previewCapability(for: .expandSnippet, plan: plan)
+        case .runningAppSwitch:
+            return try previewCapability(for: .switchRunningApp, plan: plan)
+        case .recentArtifacts:
+            return try previewCapability(for: .lookupRecentArtifacts, plan: plan)
         case .mediaOpen:
             return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
@@ -196,6 +236,8 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .createWorkspace, plan: plan)
         case .openWorkspace:
             return try previewCapability(for: .openWorkspace, plan: plan)
+        case .invokeShortcut:
+            return try previewCapability(for: .invokeShortcut, plan: plan)
         case .chain:
             return try previewChain(plan)
         }
@@ -229,6 +271,18 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .openGeneratedArtifact, plan: resolvedPlan, log: log)
         case .createLocalDraft:
             return try await executeCapability(for: .createLocalDraft, plan: resolvedPlan, log: log)
+        case .calculator:
+            return try await executeCapability(for: .calculateUtility, plan: resolvedPlan, log: log)
+        case .clipboardHistory:
+            return try await executeCapability(for: .lookupClipboardHistory, plan: resolvedPlan, log: log)
+        case .snippetSave:
+            return try await executeCapability(for: .saveSnippet, plan: resolvedPlan, log: log)
+        case .snippetExpansion:
+            return try await executeCapability(for: .expandSnippet, plan: resolvedPlan, log: log)
+        case .runningAppSwitch:
+            return try await executeCapability(for: .switchRunningApp, plan: resolvedPlan, log: log)
+        case .recentArtifacts:
+            return try await executeCapability(for: .lookupRecentArtifacts, plan: resolvedPlan, log: log)
         case .mediaOpen:
             return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
@@ -245,6 +299,8 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .createWorkspace, plan: resolvedPlan, log: log)
         case .openWorkspace:
             return try await executeCapability(for: .openWorkspace, plan: resolvedPlan, log: log)
+        case .invokeShortcut:
+            return try await executeCapability(for: .invokeShortcut, plan: resolvedPlan, log: log)
         case .chain:
             return try await executeChain(resolvedPlan, log: log)
         }
@@ -261,6 +317,12 @@ public final class AgentActionExecutor {
         case openURL
         case openGeneratedArtifact
         case createLocalDraft
+        case calculator
+        case clipboardHistory
+        case snippetSave
+        case snippetExpansion
+        case runningAppSwitch
+        case recentArtifacts
         case mediaOpen
         case finderSelection
         case revealInFinder
@@ -269,6 +331,7 @@ public final class AgentActionExecutor {
         case runRoutine
         case createWorkspace
         case openWorkspace
+        case invokeShortcut
         case chain
     }
 
@@ -300,6 +363,12 @@ public final class AgentActionExecutor {
              .openURL,
              .openGeneratedArtifact,
              .createLocalDraft,
+             .calculator,
+             .clipboardHistory,
+             .snippetSave,
+             .snippetExpansion,
+             .runningAppSwitch,
+             .recentArtifacts,
              .mediaOpen,
              .finderSelection,
              .revealInFinder,
@@ -307,7 +376,8 @@ public final class AgentActionExecutor {
              .saveRoutine,
              .runRoutine,
              .createWorkspace,
-             .openWorkspace:
+             .openWorkspace,
+             .invokeShortcut:
             return true
         case .clarify,
              .largestFiles,
@@ -341,6 +411,18 @@ public final class AgentActionExecutor {
             return .openGeneratedArtifact
         case .createLocalDraft:
             return .createLocalDraft
+        case .calculateUtility:
+            return .calculator
+        case .lookupClipboardHistory:
+            return .clipboardHistory
+        case .saveSnippet:
+            return .snippetSave
+        case .expandSnippet:
+            return .snippetExpansion
+        case .switchRunningApp:
+            return .runningAppSwitch
+        case .lookupRecentArtifacts:
+            return .recentArtifacts
         case .playMedia:
             return .mediaOpen
         case .getFinderSelection:
@@ -357,6 +439,8 @@ public final class AgentActionExecutor {
             return .createWorkspace
         case .openWorkspace:
             return .openWorkspace
+        case .invokeShortcut:
+            return .invokeShortcut
         case .unsupported:
             throw AgentExecutionError.unsupported("Unsupported operation.")
         }
@@ -401,6 +485,12 @@ public final class AgentActionExecutor {
         if resolvedPlan.steps.contains(where: { $0.operation == .createLocalDraft }) {
             resolvedPlan = try capabilityRegistry
                 .adapter(for: .createLocalDraft)
+                .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
+        }
+
+        if resolvedPlan.steps.contains(where: { $0.operation == .invokeShortcut }) {
+            resolvedPlan = try capabilityRegistry
+                .adapter(for: .invokeShortcut)
                 .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
         }
 
@@ -502,6 +592,7 @@ public final class AgentActionExecutor {
             appendIfPresent(step.inputPath, to: &resources)
             appendIfPresent(step.routineName.map { "Routine: \($0)" }, to: &resources)
             appendIfPresent(step.workspaceName.map { "Workspace: \($0)" }, to: &resources)
+            appendIfPresent(step.shortcutName.map { "Shortcut: \($0)" }, to: &resources)
             if let provider = step.mediaProvider, let title = step.mediaTitle {
                 resources.append("\(provider.displayName): \(title)")
             }
@@ -528,7 +619,8 @@ public final class AgentActionExecutor {
                  .openAppSearchURL,
                  .openURL,
                  .playMedia,
-                 .openWorkspace:
+                 .openWorkspace,
+                 .invokeShortcut:
                 return true
             default:
                 return false
@@ -541,10 +633,19 @@ public final class AgentActionExecutor {
         case .tier0:
             return "No undo needed; Sonny is only reading status or context."
         case .tier1:
+            if plan.steps.contains(where: { $0.operation == .invokeShortcut }) {
+                return "Depends on the Shortcut; undo in the affected app or service if needed."
+            }
             return "Close the opened app, browser tab, media result, or Finder window."
         case .tier2:
+            if plan.steps.contains(where: { $0.operation == .invokeShortcut }) {
+                return "Depends on the Shortcut; undo in the affected app or service if needed."
+            }
             if plan.steps.contains(where: { [.saveRoutine, .createWorkspace].contains($0.operation) }) {
                 return "Edit or replace the saved routine/workspace manually."
+            }
+            if plan.steps.contains(where: { $0.operation == .saveSnippet }) {
+                return "Edit or delete the saved snippet manually."
             }
             return "Delete generated local files manually if needed."
         case .tier3:
@@ -592,6 +693,13 @@ public final class AgentActionExecutor {
             webPageLoader: webPageLoader,
             webSearchProvider: webSearchProvider,
             webResearchSynthesizer: webResearchSynthesizer,
+            clipboardHistoryStore: clipboardHistoryStore,
+            snippetStore: snippetStore,
+            runningAppSwitcher: runningAppSwitcher,
+            recentArtifactStore: recentArtifactStore,
+            shortcutCatalog: shortcutCatalog,
+            shortcutInvoker: shortcutInvoker,
+            shortcutRunHistoryStore: shortcutRunHistoryStore,
             fileManager: fileManager,
             now: now,
             assessNestedPlan: { [weak self] plan in
