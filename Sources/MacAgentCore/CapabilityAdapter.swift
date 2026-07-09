@@ -135,6 +135,7 @@ public struct CapabilityExecutionContext {
     public var webPageLoader: PublicWebPageLoader
     public var webSearchProvider: any WebSearchProviding
     public var webResearchSynthesizer: any WebResearchSynthesizing
+    public var clipboardHistoryStore: ClipboardHistoryStore
     public var fileManager: FileManager
     public var now: () -> Date
     public var assessNestedPlan: AssessNestedPlan
@@ -162,6 +163,7 @@ public struct CapabilityExecutionContext {
         webPageLoader: PublicWebPageLoader,
         webSearchProvider: any WebSearchProviding,
         webResearchSynthesizer: any WebResearchSynthesizing,
+        clipboardHistoryStore: ClipboardHistoryStore,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
         assessNestedPlan: @escaping AssessNestedPlan,
@@ -188,6 +190,7 @@ public struct CapabilityExecutionContext {
         self.webPageLoader = webPageLoader
         self.webSearchProvider = webSearchProvider
         self.webResearchSynthesizer = webResearchSynthesizer
+        self.clipboardHistoryStore = clipboardHistoryStore
         self.fileManager = fileManager
         self.now = now
         self.assessNestedPlan = assessNestedPlan

@@ -64,6 +64,7 @@ public final class AgentActionExecutor {
     private let webPageLoader: PublicWebPageLoader
     private let webSearchProvider: any WebSearchProviding
     private let webResearchSynthesizer: any WebResearchSynthesizing
+    private let clipboardHistoryStore: ClipboardHistoryStore
     private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
     private let now: () -> Date
@@ -89,6 +90,7 @@ public final class AgentActionExecutor {
         webPageLoader: PublicWebPageLoader? = nil,
         webSearchProvider: (any WebSearchProviding)? = nil,
         webResearchSynthesizer: (any WebResearchSynthesizing)? = nil,
+        clipboardHistoryStore: ClipboardHistoryStore = ClipboardHistoryStore(),
         capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -113,6 +115,7 @@ public final class AgentActionExecutor {
         self.webPageLoader = webPageLoader ?? PublicWebPageLoader.live()
         self.webSearchProvider = webSearchProvider ?? UnavailableWebSearchProvider()
         self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer()
+        self.clipboardHistoryStore = clipboardHistoryStore
         self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
         self.now = now
@@ -182,6 +185,8 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .createLocalDraft, plan: plan)
         case .calculator:
             return try previewCapability(for: .calculateUtility, plan: plan)
+        case .clipboardHistory:
+            return try previewCapability(for: .lookupClipboardHistory, plan: plan)
         case .mediaOpen:
             return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
@@ -233,6 +238,8 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .createLocalDraft, plan: resolvedPlan, log: log)
         case .calculator:
             return try await executeCapability(for: .calculateUtility, plan: resolvedPlan, log: log)
+        case .clipboardHistory:
+            return try await executeCapability(for: .lookupClipboardHistory, plan: resolvedPlan, log: log)
         case .mediaOpen:
             return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
@@ -266,6 +273,7 @@ public final class AgentActionExecutor {
         case openGeneratedArtifact
         case createLocalDraft
         case calculator
+        case clipboardHistory
         case mediaOpen
         case finderSelection
         case revealInFinder
@@ -306,6 +314,7 @@ public final class AgentActionExecutor {
              .openGeneratedArtifact,
              .createLocalDraft,
              .calculator,
+             .clipboardHistory,
              .mediaOpen,
              .finderSelection,
              .revealInFinder,
@@ -349,6 +358,8 @@ public final class AgentActionExecutor {
             return .createLocalDraft
         case .calculateUtility:
             return .calculator
+        case .lookupClipboardHistory:
+            return .clipboardHistory
         case .playMedia:
             return .mediaOpen
         case .getFinderSelection:
@@ -600,6 +611,7 @@ public final class AgentActionExecutor {
             webPageLoader: webPageLoader,
             webSearchProvider: webSearchProvider,
             webResearchSynthesizer: webResearchSynthesizer,
+            clipboardHistoryStore: clipboardHistoryStore,
             fileManager: fileManager,
             now: now,
             assessNestedPlan: { [weak self] plan in

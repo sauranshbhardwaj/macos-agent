@@ -12,6 +12,7 @@ public enum DefaultCapabilityAdapters {
             OpenGeneratedArtifactCapabilityAdapter(),
             CreateLocalDraftCapabilityAdapter(),
             CalculatorCapabilityAdapter(),
+            ClipboardHistoryCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),
             FinderSelectionCapabilityAdapter(),
             RevealInFinderCapabilityAdapter(),

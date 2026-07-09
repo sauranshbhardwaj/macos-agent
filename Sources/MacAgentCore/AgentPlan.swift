@@ -108,13 +108,15 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case openGeneratedArtifact = "open_generated_artifact"
     case createLocalDraft = "create_local_draft"
     case calculateUtility = "calculate_utility"
+    case lookupClipboardHistory = "lookup_clipboard_history"
     case clarify
     case unsupported
 
     public static var plannerVisibleCases: [AgentOperation] {
         allCases.filter { operation in
             switch operation {
-            case .calculateUtility:
+            case .calculateUtility,
+                 .lookupClipboardHistory:
                 return false
             default:
                 return true

@@ -26,6 +26,8 @@ final class AgentViewModel: ObservableObject {
     @Published var savedRoutines: [StoredRoutine] = []
     @Published var savedWorkspaces: [StoredWorkspace] = []
     @Published var approvalRequest: RiskApprovalRequest?
+    @Published var showClipboardHistoryNotice: Bool = false
+    @Published var clipboardHistoryEnabled: Bool = true
 
     let logStore = AgentLogStore()
 
@@ -36,6 +38,9 @@ final class AgentViewModel: ObservableObject {
     private let permissionReadinessService = PermissionReadinessService()
     private let routineStore = RoutineStore()
     private let workspaceStore = WorkspaceStore()
+    private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
+    private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
+    private var clipboardHistoryTimer: Timer?
     private var clarificationAutoExecute = false
     private var isPushToTalkHotKeyDown = false
 
@@ -316,6 +321,36 @@ final class AgentViewModel: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    func refreshClipboardHistoryNotice() {
+        let settings = (try? clipboardHistorySettingsStore.load()) ?? ClipboardHistorySettings()
+        clipboardHistoryEnabled = settings.isEnabled
+        showClipboardHistoryNotice = !settings.noticeDismissed
+
+        if settings.noticeDismissed && settings.isEnabled {
+            startClipboardHistoryMonitoring()
+        } else {
+            stopClipboardHistoryMonitoring()
+        }
+    }
+
+    func applyClipboardHistoryNoticeChoice() {
+        let settings = ClipboardHistorySettings(
+            noticeDismissed: true,
+            isEnabled: clipboardHistoryEnabled
+        )
+        do {
+            try clipboardHistorySettingsStore.save(settings)
+            showClipboardHistoryNotice = false
+            if clipboardHistoryEnabled {
+                startClipboardHistoryMonitoring()
+            } else {
+                stopClipboardHistoryMonitoring()
+            }
+        } catch {
+            errorMessage = "Could not save clipboard history setting: \(error.localizedDescription)"
+        }
+    }
+
     func runRoutineWidget(_ routine: StoredRoutine) {
         command = "Run my \(routine.name) routine."
         dryRun = false
@@ -368,9 +403,31 @@ final class AgentViewModel: ObservableObject {
         showPermissionPanel = false
         refreshPermissions()
         refreshSavedItems()
+        refreshClipboardHistoryNotice()
         preparedRun = nil
         runner = nil
         logStore.reset()
+    }
+
+    private func startClipboardHistoryMonitoring() {
+        guard clipboardHistoryTimer == nil else {
+            return
+        }
+
+        _ = try? clipboardHistoryMonitor.poll()
+        clipboardHistoryTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else {
+                    return
+                }
+                _ = try? self.clipboardHistoryMonitor.poll()
+            }
+        }
+    }
+
+    private func stopClipboardHistoryMonitoring() {
+        clipboardHistoryTimer?.invalidate()
+        clipboardHistoryTimer = nil
     }
 
     private func startVoiceRecording(trigger: VoiceRecordingTrigger) {

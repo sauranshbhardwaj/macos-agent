@@ -49,6 +49,8 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .createLocalDraft) is CreateLocalDraftCapabilityAdapter)
         #expect(try registry.adapter(for: .calculateUtility).metadata.id == "local.instant.calculator")
         #expect(try registry.adapter(for: .calculateUtility) is CalculatorCapabilityAdapter)
+        #expect(try registry.adapter(for: .lookupClipboardHistory).metadata.id == "local.instant.clipboard-history")
+        #expect(try registry.adapter(for: .lookupClipboardHistory) is ClipboardHistoryCapabilityAdapter)
         #expect(try registry.adapter(for: .playMedia).metadata.id == "local.media.open-result")
         #expect(try registry.adapter(for: .playMedia) is OpenMediaResultCapabilityAdapter)
         #expect(try registry.adapter(for: .getFinderSelection).metadata.id == "local.finder.read-selection")

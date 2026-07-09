@@ -21,10 +21,28 @@ public struct InstantCommandResolver: Sendable {
             return .plan(calculatorPlan(expression: expression))
         }
 
+        if let query = prefixedClipboardHistoryQuery(in: command) {
+            return .plan(clipboardHistoryPlan(query: query))
+        }
+
         if looksLikeBareArithmetic(command) || looksLikeBareConversion(command) {
             return .plan(calculatorPlan(expression: command))
         }
 
+        return nil
+    }
+
+    private func prefixedClipboardHistoryQuery(in command: String) -> String? {
+        let lowered = command.lowercased()
+        for prefix in ["clipboard history", "clipboard", "clip"] {
+            if lowered == prefix {
+                return ""
+            }
+            if lowered.hasPrefix("\(prefix) ") {
+                return String(command.dropFirst(prefix.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
         return nil
     }
 
@@ -79,6 +97,28 @@ public struct InstantCommandResolver: Sendable {
                     operation: .calculateUtility,
                     description: "Calculate \(expression).",
                     searchQuery: expression
+                )
+            ]
+        )
+    }
+
+    private func clipboardHistoryPlan(query: String?) -> AgentPlan {
+        let summary: String
+        if let query, !query.isEmpty {
+            summary = "Search clipboard history for \(query)."
+        } else {
+            summary = "Show clipboard history."
+        }
+        return AgentPlan(
+            summary: summary,
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "clipboard-history",
+                    operation: .lookupClipboardHistory,
+                    description: summary,
+                    count: 10,
+                    searchQuery: query?.isEmpty == true ? nil : query
                 )
             ]
         )

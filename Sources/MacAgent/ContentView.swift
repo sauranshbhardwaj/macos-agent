@@ -24,6 +24,9 @@ struct ContentView: View {
                 header
                 commandInput
                 controls
+                if viewModel.showClipboardHistoryNotice {
+                    ClipboardHistoryNotice(viewModel: viewModel)
+                }
                 SavedItemsPanel(viewModel: viewModel)
 
                 if viewModel.isPreparingVoiceRecording || viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
@@ -64,6 +67,7 @@ struct ContentView: View {
             commandFocused = true
             viewModel.refreshPermissions()
             viewModel.refreshSavedItems()
+            viewModel.refreshClipboardHistoryNotice()
         }
     }
 
@@ -178,6 +182,51 @@ struct ContentView: View {
             .buttonStyle(SonnyButtonStyle(tone: .primary, width: 92))
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+private struct ClipboardHistoryNotice: View {
+    @ObservedObject var viewModel: AgentViewModel
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "clipboard")
+                .font(SonnyType.icon(16))
+                .foregroundStyle(SonnyTheme.accent)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Clipboard history")
+                    .font(SonnyType.caption)
+                    .foregroundStyle(SonnyTheme.text)
+                Text("Sonny can watch copied text system-wide, excluding password-manager entries flagged ConcealedType or TransientType, and keeps a capped local history.")
+                    .font(SonnyType.micro)
+                    .foregroundStyle(SonnyTheme.muted)
+                    .lineSpacing(1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Toggle("", isOn: $viewModel.clipboardHistoryEnabled)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .help("Enable clipboard history")
+
+            Button {
+                viewModel.applyClipboardHistoryNoticeChoice()
+            } label: {
+                Label("Done", systemImage: "checkmark")
+            }
+            .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 82))
+        }
+        .padding(12)
+        .background(SonnyTheme.surfaceRaised.opacity(0.84))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(SonnyTheme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -436,6 +485,8 @@ private struct SavedItemsPanel: View {
             return "Create draft"
         case .calculateUtility:
             return "Calculate"
+        case .lookupClipboardHistory:
+            return "Clipboard history"
         case .playMedia:
             return "Open \(step.mediaTitle ?? "music")"
         case .scanSelectLargestFiles:
