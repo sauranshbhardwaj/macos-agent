@@ -35,6 +35,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
     public var searchQuery: String?
     public var draftTitle: String?
     public var draftContent: String?
+    public var shortcutName: String?
+    public var shortcutInput: String?
 
     public init(
         id: String,
@@ -58,7 +60,9 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         sourceURLs: [String]? = nil,
         searchQuery: String? = nil,
         draftTitle: String? = nil,
-        draftContent: String? = nil
+        draftContent: String? = nil,
+        shortcutName: String? = nil,
+        shortcutInput: String? = nil
     ) {
         self.id = id
         self.operation = operation
@@ -82,6 +86,8 @@ public struct AgentStep: Codable, Equatable, Identifiable, Sendable {
         self.searchQuery = searchQuery
         self.draftTitle = draftTitle
         self.draftContent = draftContent
+        self.shortcutName = shortcutName
+        self.shortcutInput = shortcutInput
     }
 }
 
@@ -112,6 +118,7 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case expandSnippet = "expand_snippet"
     case switchRunningApp = "switch_running_app"
     case lookupRecentArtifacts = "lookup_recent_artifacts"
+    case invokeShortcut = "invoke_shortcut"
     case clarify
     case unsupported
 
@@ -194,7 +201,9 @@ public enum AgentPlanDecoder {
         "sourceURLs",
         "searchQuery",
         "draftTitle",
-        "draftContent"
+        "draftContent",
+        "shortcutName",
+        "shortcutInput"
     ]
 
     public static func decodeStrict(from data: Data) throws -> AgentPlan {
@@ -263,7 +272,9 @@ public enum AgentPlanSchema {
         "sourceURLs",
         "searchQuery",
         "draftTitle",
-        "draftContent"
+        "draftContent",
+        "shortcutName",
+        "shortcutInput"
     ]
 
     public static func responseFormat() -> [String: Any] {
@@ -399,6 +410,14 @@ public enum AgentPlanSchema {
             "draftContent": [
                 "type": ["string", "null"],
                 "description": "User-provided body content for create_local_draft Markdown drafts, or null."
+            ],
+            "shortcutName": [
+                "type": ["string", "null"],
+                "description": "Existing Apple Shortcut name for invoke_shortcut, or null."
+            ],
+            "shortcutInput": [
+                "type": ["string", "null"],
+                "description": "Simple text input to pass to invoke_shortcut through a temporary input file, or null."
             ]
         ]
     }

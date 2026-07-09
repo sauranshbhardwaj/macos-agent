@@ -493,6 +493,8 @@ private struct SavedItemsPanel: View {
             return "Switch to \(step.appName ?? "app")"
         case .lookupRecentArtifacts:
             return "Recent artifacts"
+        case .invokeShortcut:
+            return "Run \(step.shortcutName ?? "Shortcut")"
         case .playMedia:
             return "Open \(step.mediaTitle ?? "music")"
         case .scanSelectLargestFiles:

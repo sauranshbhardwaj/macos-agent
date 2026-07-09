@@ -134,6 +134,7 @@ public final class OpenAIPlanner: Planning {
     - For running a saved routine, produce one run_routine step with routineName.
     - For creating a workspace, produce one create_workspace step with workspaceName, workspaceApps, and workspaceURLs. Use only explicitly named apps/URLs. If none are provided, ask a clarification question.
     - For opening a saved workspace, produce one open_workspace step with workspaceName.
+    - For running an existing Apple Shortcut, produce one invoke_shortcut step with shortcutName and optional shortcutInput when simple text input was explicitly supplied.
     - You may produce multi-step chained plans when the user asks for multiple supported actions. Keep steps in execution order.
     - For any unsupported request, return one unsupported step and explain why.
     - Never include shell commands, AppleScript, or code.

@@ -27,6 +27,7 @@ public enum CapabilityPermissionRequirement: String, Codable, CaseIterable, Equa
     case networkAccess = "network_access"
     case finderAutomation = "finder_automation"
     case wordAutomation = "word_automation"
+    case shortcutsAutomation = "shortcuts_automation"
 
     public var displayName: String {
         switch self {
@@ -42,6 +43,8 @@ public enum CapabilityPermissionRequirement: String, Codable, CaseIterable, Equa
             return "Finder automation"
         case .wordAutomation:
             return "Microsoft Word automation"
+        case .shortcutsAutomation:
+            return "Shortcuts automation"
         }
     }
 
@@ -59,6 +62,8 @@ public enum CapabilityPermissionRequirement: String, Codable, CaseIterable, Equa
             return "Sonny may use a fixed Finder AppleScript template."
         case .wordAutomation:
             return "Sonny may use a fixed Microsoft Word AppleScript template."
+        case .shortcutsAutomation:
+            return "Sonny may invoke a named Apple Shortcut through the fixed Shortcuts CLI template."
         }
     }
 }
@@ -139,6 +144,9 @@ public struct CapabilityExecutionContext {
     public var snippetStore: SnippetStore
     public var runningAppSwitcher: any RunningAppSwitching
     public var recentArtifactStore: RecentArtifactStore
+    public var shortcutCatalog: any ShortcutCatalogProviding
+    public var shortcutInvoker: any ShortcutInvoking
+    public var shortcutRunHistoryStore: ShortcutRunHistoryStore
     public var fileManager: FileManager
     public var now: () -> Date
     public var assessNestedPlan: AssessNestedPlan
@@ -170,6 +178,9 @@ public struct CapabilityExecutionContext {
         snippetStore: SnippetStore,
         runningAppSwitcher: any RunningAppSwitching,
         recentArtifactStore: RecentArtifactStore,
+        shortcutCatalog: any ShortcutCatalogProviding,
+        shortcutInvoker: any ShortcutInvoking,
+        shortcutRunHistoryStore: ShortcutRunHistoryStore,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init,
         assessNestedPlan: @escaping AssessNestedPlan,
@@ -200,6 +211,9 @@ public struct CapabilityExecutionContext {
         self.snippetStore = snippetStore
         self.runningAppSwitcher = runningAppSwitcher
         self.recentArtifactStore = recentArtifactStore
+        self.shortcutCatalog = shortcutCatalog
+        self.shortcutInvoker = shortcutInvoker
+        self.shortcutRunHistoryStore = shortcutRunHistoryStore
         self.fileManager = fileManager
         self.now = now
         self.assessNestedPlan = assessNestedPlan

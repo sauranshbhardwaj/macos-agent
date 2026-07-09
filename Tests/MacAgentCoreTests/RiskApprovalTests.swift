@@ -106,7 +106,8 @@ struct RiskApprovalTests {
             "local.web.research-markdown": .tier2,
             "local.routines.save": .tier2,
             "local.routines.run": .tier2,
-            "local.workspaces.create": .tier2
+            "local.workspaces.create": .tier2,
+            "local.shortcuts.invoke": .tier2
         ]
 
         for (capabilityID, tier) in expected {

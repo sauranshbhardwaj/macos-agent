@@ -68,6 +68,9 @@ public final class AgentActionExecutor {
     private let snippetStore: SnippetStore
     private let runningAppSwitcher: any RunningAppSwitching
     private let recentArtifactStore: RecentArtifactStore
+    private let shortcutCatalog: any ShortcutCatalogProviding
+    private let shortcutInvoker: any ShortcutInvoking
+    private let shortcutRunHistoryStore: ShortcutRunHistoryStore
     private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
     private let now: () -> Date
@@ -97,6 +100,9 @@ public final class AgentActionExecutor {
         snippetStore: SnippetStore = SnippetStore(),
         runningAppSwitcher: any RunningAppSwitching = WorkspaceRunningAppSwitcher(),
         recentArtifactStore: RecentArtifactStore = RecentArtifactStore(),
+        shortcutCatalog: any ShortcutCatalogProviding = ProcessShortcutCatalog(),
+        shortcutInvoker: any ShortcutInvoking = ProcessShortcutInvoker(),
+        shortcutRunHistoryStore: ShortcutRunHistoryStore = ShortcutRunHistoryStore(),
         capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -125,6 +131,9 @@ public final class AgentActionExecutor {
         self.snippetStore = snippetStore
         self.runningAppSwitcher = runningAppSwitcher
         self.recentArtifactStore = recentArtifactStore
+        self.shortcutCatalog = shortcutCatalog
+        self.shortcutInvoker = shortcutInvoker
+        self.shortcutRunHistoryStore = shortcutRunHistoryStore
         self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
         self.now = now
@@ -140,6 +149,13 @@ public final class AgentActionExecutor {
         }
 
         let resolvedPlan = try resolveDefaultOutputs(in: plan)
+        if let question = try clarificationQuestion(in: resolvedPlan) {
+            let preview = ActionPreview(
+                title: "Clarification needed",
+                details: [question]
+            )
+            return PreparedAgentRun(plan: resolvedPlan, previews: [preview], clarificationQuestion: question)
+        }
         let previews = try preview(plan: resolvedPlan)
         return PreparedAgentRun(plan: resolvedPlan, previews: previews)
     }
@@ -218,6 +234,8 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .createWorkspace, plan: plan)
         case .openWorkspace:
             return try previewCapability(for: .openWorkspace, plan: plan)
+        case .invokeShortcut:
+            return try previewCapability(for: .invokeShortcut, plan: plan)
         case .chain:
             return try previewChain(plan)
         }
@@ -277,6 +295,8 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .createWorkspace, plan: resolvedPlan, log: log)
         case .openWorkspace:
             return try await executeCapability(for: .openWorkspace, plan: resolvedPlan, log: log)
+        case .invokeShortcut:
+            return try await executeCapability(for: .invokeShortcut, plan: resolvedPlan, log: log)
         case .chain:
             return try await executeChain(resolvedPlan, log: log)
         }
@@ -306,6 +326,7 @@ public final class AgentActionExecutor {
         case runRoutine
         case createWorkspace
         case openWorkspace
+        case invokeShortcut
         case chain
     }
 
@@ -349,7 +370,8 @@ public final class AgentActionExecutor {
              .saveRoutine,
              .runRoutine,
              .createWorkspace,
-             .openWorkspace:
+             .openWorkspace,
+             .invokeShortcut:
             return true
         case .clarify,
              .largestFiles,
@@ -409,6 +431,8 @@ public final class AgentActionExecutor {
             return .createWorkspace
         case .openWorkspace:
             return .openWorkspace
+        case .invokeShortcut:
+            return .invokeShortcut
         case .unsupported:
             throw AgentExecutionError.unsupported("Unsupported operation.")
         }
@@ -453,6 +477,12 @@ public final class AgentActionExecutor {
         if resolvedPlan.steps.contains(where: { $0.operation == .createLocalDraft }) {
             resolvedPlan = try capabilityRegistry
                 .adapter(for: .createLocalDraft)
+                .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
+        }
+
+        if resolvedPlan.steps.contains(where: { $0.operation == .invokeShortcut }) {
+            resolvedPlan = try capabilityRegistry
+                .adapter(for: .invokeShortcut)
                 .resolveDefaultOutputs(in: resolvedPlan, context: capabilityContext())
         }
 
@@ -554,6 +584,7 @@ public final class AgentActionExecutor {
             appendIfPresent(step.inputPath, to: &resources)
             appendIfPresent(step.routineName.map { "Routine: \($0)" }, to: &resources)
             appendIfPresent(step.workspaceName.map { "Workspace: \($0)" }, to: &resources)
+            appendIfPresent(step.shortcutName.map { "Shortcut: \($0)" }, to: &resources)
             if let provider = step.mediaProvider, let title = step.mediaTitle {
                 resources.append("\(provider.displayName): \(title)")
             }
@@ -580,7 +611,8 @@ public final class AgentActionExecutor {
                  .openAppSearchURL,
                  .openURL,
                  .playMedia,
-                 .openWorkspace:
+                 .openWorkspace,
+                 .invokeShortcut:
                 return true
             default:
                 return false
@@ -593,8 +625,14 @@ public final class AgentActionExecutor {
         case .tier0:
             return "No undo needed; Sonny is only reading status or context."
         case .tier1:
+            if plan.steps.contains(where: { $0.operation == .invokeShortcut }) {
+                return "Depends on the Shortcut; undo in the affected app or service if needed."
+            }
             return "Close the opened app, browser tab, media result, or Finder window."
         case .tier2:
+            if plan.steps.contains(where: { $0.operation == .invokeShortcut }) {
+                return "Depends on the Shortcut; undo in the affected app or service if needed."
+            }
             if plan.steps.contains(where: { [.saveRoutine, .createWorkspace].contains($0.operation) }) {
                 return "Edit or replace the saved routine/workspace manually."
             }
@@ -648,6 +686,9 @@ public final class AgentActionExecutor {
             snippetStore: snippetStore,
             runningAppSwitcher: runningAppSwitcher,
             recentArtifactStore: recentArtifactStore,
+            shortcutCatalog: shortcutCatalog,
+            shortcutInvoker: shortcutInvoker,
+            shortcutRunHistoryStore: shortcutRunHistoryStore,
             fileManager: fileManager,
             now: now,
             assessNestedPlan: { [weak self] plan in

@@ -10,17 +10,20 @@ public struct InstantCommandResolver: Sendable {
     private let recentArtifactStore: RecentArtifactStore
     private let routineStore: RoutineStore
     private let workspaceStore: WorkspaceStore
+    private let shortcutCatalog: any ShortcutCatalogProviding
 
     public init(
         snippetStore: SnippetStore = SnippetStore(),
         recentArtifactStore: RecentArtifactStore = RecentArtifactStore(),
         routineStore: RoutineStore = RoutineStore(),
-        workspaceStore: WorkspaceStore = WorkspaceStore()
+        workspaceStore: WorkspaceStore = WorkspaceStore(),
+        shortcutCatalog: any ShortcutCatalogProviding = ProcessShortcutCatalog()
     ) {
         self.snippetStore = snippetStore
         self.recentArtifactStore = recentArtifactStore
         self.routineStore = routineStore
         self.workspaceStore = workspaceStore
+        self.shortcutCatalog = shortcutCatalog
     }
 
     public func resolve(command rawCommand: String) -> InstantCommandResolution? {
@@ -42,6 +45,10 @@ public struct InstantCommandResolver: Sendable {
 
         if let quickDispatch = quickDispatchResolution(in: command) {
             return quickDispatch
+        }
+
+        if let shortcut = shortcutResolution(in: command) {
+            return shortcut
         }
 
         if let query = prefixedRunningAppQuery(in: command) {
@@ -74,6 +81,11 @@ public struct InstantCommandResolver: Sendable {
     private enum RecentArtifactRequest {
         case lookup(String?)
         case open(String?)
+    }
+
+    private struct ShortcutLaunchRequest {
+        var name: String
+        var input: String?
     }
 
     private func quickDispatchResolution(in command: String) -> InstantCommandResolution? {
@@ -167,6 +179,64 @@ public struct InstantCommandResolver: Sendable {
             }
         }
         return nil
+    }
+
+    private func shortcutResolution(in command: String) -> InstantCommandResolution? {
+        guard let request = shortcutLaunchRequest(in: command) else {
+            return nil
+        }
+
+        do {
+            let resolvedName = try shortcutCatalog.resolveShortcutName(request.name)
+            return .plan(invokeShortcutPlan(name: resolvedName, input: request.input))
+        } catch ShortcutsBridgeError.missingShortcutName {
+            return .clarify(shortcutClarificationPlan(question: "Which Shortcut should I run?"))
+        } catch ShortcutsBridgeError.unknownShortcut(let name, let available) {
+            let suffix = available.isEmpty ? "" : " Available Shortcuts include: \(available.prefix(5).joined(separator: ", "))."
+            return .clarify(shortcutClarificationPlan(question: "I could not find a Shortcut named \(name). Which Shortcut should I run?\(suffix)"))
+        } catch {
+            return .clarify(shortcutClarificationPlan(question: "I could not read your Shortcuts list. Which Shortcut should I run?"))
+        }
+    }
+
+    private func shortcutLaunchRequest(in command: String) -> ShortcutLaunchRequest? {
+        let lowered = command.lowercased()
+        let explicitPrefixes = ["run shortcut", "invoke shortcut", "shortcut"]
+        for prefix in explicitPrefixes {
+            if lowered == prefix {
+                return ShortcutLaunchRequest(name: "", input: nil)
+            }
+            if lowered.hasPrefix("\(prefix) ") {
+                return shortcutRequest(from: String(command.dropFirst(prefix.count)))
+            }
+        }
+
+        for prefix in ["run", "start", "launch"] where lowered.hasPrefix("\(prefix) ") {
+            let remainder = String(command.dropFirst(prefix.count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if remainder.lowercased().hasSuffix(" shortcut") || remainder.lowercased().contains(" shortcut with input ") {
+                return shortcutRequest(from: remainder)
+            }
+        }
+
+        return nil
+    }
+
+    private func shortcutRequest(from rawValue: String) -> ShortcutLaunchRequest {
+        var value = strippedLaunchArticle(rawValue)
+        var input: String?
+        if let range = value.range(of: " with input ", options: [.caseInsensitive]) {
+            input = String(value[range.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            value = String(value[..<range.lowerBound])
+        }
+        if value.lowercased().hasSuffix(" shortcut") {
+            value = String(value.dropLast(" shortcut".count))
+        }
+        return ShortcutLaunchRequest(
+            name: value.trimmingCharacters(in: .whitespacesAndNewlines),
+            input: input?.isEmpty == true ? nil : input
+        )
     }
 
     private func prefixedRunningAppQuery(in command: String) -> String? {
@@ -392,6 +462,22 @@ public struct InstantCommandResolver: Sendable {
         )
     }
 
+    private func invokeShortcutPlan(name: String, input: String?) -> AgentPlan {
+        AgentPlan(
+            summary: "Run Shortcut \(name).",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "invoke-shortcut",
+                    operation: .invokeShortcut,
+                    description: "Run Shortcut \(name).",
+                    shortcutName: name,
+                    shortcutInput: input
+                )
+            ]
+        )
+    }
+
     private func snippetPlan(_ snippet: StoredSnippet) -> AgentPlan {
         AgentPlan(
             summary: "Expand snippet \(snippet.trigger).",
@@ -402,6 +488,21 @@ public struct InstantCommandResolver: Sendable {
                     operation: .expandSnippet,
                     description: "Expand snippet \(snippet.trigger).",
                     searchQuery: snippet.trigger
+                )
+            ]
+        )
+    }
+
+    private func shortcutClarificationPlan(question: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Clarification needed.",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "clarify-shortcut",
+                    operation: .clarify,
+                    description: "Ask which Shortcut to run.",
+                    question: question
                 )
             ]
         )
