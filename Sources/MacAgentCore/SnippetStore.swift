@@ -39,9 +39,15 @@ public enum SnippetStoreError: Error, Equatable, LocalizedError {
 public struct SnippetStore: @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -78,7 +84,15 @@ public struct SnippetStore: @unchecked Sendable {
             return [:]
         }
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder.snippetISO8601.decode([String: StoredSnippet].self, from: data)
+        let decoded = try encryption.decode(
+            [String: StoredSnippet].self,
+            from: data,
+            decoder: .snippetISO8601
+        )
+        if decoded.wasLegacyPlaintext {
+            try write(decoded.value)
+        }
+        return decoded.value
     }
 
     private func validated(_ snippet: StoredSnippet) throws -> StoredSnippet {
@@ -106,7 +120,7 @@ public struct SnippetStore: @unchecked Sendable {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.snippetPrettySorted.encode(snippets)
+        let data = try encryption.encode(snippets, encoder: .snippetPrettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }

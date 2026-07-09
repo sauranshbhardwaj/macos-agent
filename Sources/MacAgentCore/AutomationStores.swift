@@ -59,9 +59,15 @@ public enum AutomationStoreError: Error, LocalizedError, Equatable {
 public struct RoutineStore: @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -89,7 +95,11 @@ public struct RoutineStore: @unchecked Sendable {
             return [:]
         }
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode([String: StoredRoutine].self, from: data)
+        let decoded = try encryption.decode([String: StoredRoutine].self, from: data)
+        if decoded.wasLegacyPlaintext {
+            try write(decoded.value)
+        }
+        return decoded.value
     }
 
     private func write(_ routines: [String: StoredRoutine]) throws {
@@ -97,7 +107,7 @@ public struct RoutineStore: @unchecked Sendable {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.prettySorted.encode(routines)
+        let data = try encryption.encode(routines, encoder: .prettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }
@@ -105,9 +115,15 @@ public struct RoutineStore: @unchecked Sendable {
 public struct WorkspaceStore: @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -135,7 +151,11 @@ public struct WorkspaceStore: @unchecked Sendable {
             return [:]
         }
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode([String: StoredWorkspace].self, from: data)
+        let decoded = try encryption.decode([String: StoredWorkspace].self, from: data)
+        if decoded.wasLegacyPlaintext {
+            try write(decoded.value)
+        }
+        return decoded.value
     }
 
     private func write(_ workspaces: [String: StoredWorkspace]) throws {
@@ -143,7 +163,7 @@ public struct WorkspaceStore: @unchecked Sendable {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.prettySorted.encode(workspaces)
+        let data = try encryption.encode(workspaces, encoder: .prettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }

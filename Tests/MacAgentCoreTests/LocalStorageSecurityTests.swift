@@ -1,0 +1,343 @@
+import Foundation
+import Testing
+@testable import MacAgentCore
+
+@Suite(.serialized)
+struct LocalStorageSecurityTests {
+    @Test
+    func routineStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = "sensitive routine \(UUID().uuidString)"
+        let store = RoutineStore(
+            fileURL: root.appendingPathComponent("routines.json"),
+            encryption: testEncryption()
+        )
+
+        try store.save(
+            StoredRoutine(
+                name: marker,
+                steps: [AgentStep(id: "open", operation: .openApp, description: marker, appName: "Safari")]
+            )
+        )
+
+        try expectEncryptedFile(store.fileURL, hiding: marker)
+        #expect(try store.routine(named: marker).name == marker)
+    }
+
+    @Test
+    func workspaceStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = "sensitive workspace \(UUID().uuidString)"
+        let store = WorkspaceStore(
+            fileURL: root.appendingPathComponent("workspaces.json"),
+            encryption: testEncryption()
+        )
+
+        try store.save(StoredWorkspace(name: marker, apps: ["Safari"], urls: ["https://example.com/\(marker)"]))
+
+        try expectEncryptedFile(store.fileURL, hiding: marker)
+        #expect(try store.workspace(named: marker).name == marker)
+    }
+
+    @Test
+    func clipboardHistoryStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = "sensitive clipboard \(UUID().uuidString)"
+        let store = ClipboardHistoryStore(
+            fileURL: root.appendingPathComponent("clipboard-history.json"),
+            encryption: testEncryption()
+        )
+
+        try store.record(marker, copiedAt: .fixture)
+
+        try expectEncryptedFile(store.fileURL, hiding: marker)
+        #expect(try store.loadAll(now: .fixture).first?.text == marker)
+    }
+
+    @Test
+    func clipboardSettingsStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ClipboardHistorySettingsStore(
+            fileURL: root.appendingPathComponent("clipboard-history-settings.json"),
+            encryption: testEncryption()
+        )
+
+        try store.save(ClipboardHistorySettings(noticeDismissed: true, isEnabled: false))
+
+        let raw = try Data(contentsOf: store.fileURL)
+        #expect(raw.starts(with: LocalStorageEncryption.fileHeader))
+        #expect(raw.range(of: Data("\"noticeDismissed\"".utf8)) == nil)
+        #expect(try store.load() == ClipboardHistorySettings(noticeDismissed: true, isEnabled: false))
+    }
+
+    @Test
+    func snippetStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = "sensitive snippet \(UUID().uuidString)"
+        let store = SnippetStore(
+            fileURL: root.appendingPathComponent("snippets.json"),
+            encryption: testEncryption()
+        )
+
+        try store.save(StoredSnippet(trigger: ";secret", expansion: marker, updatedAt: .fixture))
+
+        try expectEncryptedFile(store.fileURL, hiding: marker)
+        #expect(try store.snippet(matchingTrigger: ";secret").expansion == marker)
+    }
+
+    @Test
+    func recentArtifactStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = "sensitive-artifact-\(UUID().uuidString).md"
+        let artifact = root.appendingPathComponent(marker)
+        try Data("artifact".utf8).write(to: artifact, options: .atomic)
+        let store = RecentArtifactStore(
+            fileURL: root.appendingPathComponent("recent-artifacts.json"),
+            encryption: testEncryption()
+        )
+
+        try store.record(path: artifact.path, recordedAt: .fixture)
+
+        try expectEncryptedFile(store.fileURL, hiding: marker)
+        #expect(try store.loadAll(now: .fixture).first?.path == artifact.path)
+    }
+
+    @Test
+    func shortcutRunHistoryStoreEncryptsRawFileBytesAndRoundTrips() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let marker = "sensitive shortcut \(UUID().uuidString)"
+        let store = ShortcutRunHistoryStore(
+            fileURL: root.appendingPathComponent("shortcuts-run-history.json"),
+            encryption: testEncryption()
+        )
+
+        try store.recordSuccess(shortcutName: marker, at: .fixture)
+
+        try expectEncryptedFile(store.fileURL, hiding: marker)
+        #expect(try store.hasCleanObservedSuccess(for: marker))
+    }
+
+    @Test
+    func legacyPlaintextFilesMigrateToEncryptedFilesAfterSuccessfulLoad() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let encryption = testEncryption()
+
+        try assertRoutineMigration(root: root, encryption: encryption)
+        try assertWorkspaceMigration(root: root, encryption: encryption)
+        try assertClipboardHistoryMigration(root: root, encryption: encryption)
+        try assertClipboardSettingsMigration(root: root, encryption: encryption)
+        try assertSnippetMigration(root: root, encryption: encryption)
+        try assertRecentArtifactMigration(root: root, encryption: encryption)
+        try assertShortcutHistoryMigration(root: root, encryption: encryption)
+    }
+
+    @Test
+    func keyManagerGeneratesStoresAndReusesSymmetricKeyData() throws {
+        let generated = Data(repeating: 0xAB, count: 32)
+        let replacement = Data(repeating: 0xCD, count: 32)
+        let secrets = FakeKeychainSecretStore()
+        let first = LocalStorageEncryptionKeyManager(
+            secretStore: secrets,
+            service: "test.local-storage",
+            account: "key",
+            generateKeyData: { generated }
+        )
+
+        #expect(try first.keyData() == generated)
+        #expect(secrets.savedData == generated)
+
+        let second = LocalStorageEncryptionKeyManager(
+            secretStore: secrets,
+            service: "test.local-storage",
+            account: "key",
+            generateKeyData: { replacement }
+        )
+        #expect(try second.keyData() == generated)
+    }
+
+    @Test
+    func keyManagerRejectsInvalidStoredKeyLength() throws {
+        let secrets = FakeKeychainSecretStore()
+        try secrets.save(Data(repeating: 0x01, count: 16), service: "test.local-storage", account: "key")
+        let manager = LocalStorageEncryptionKeyManager(
+            secretStore: secrets,
+            service: "test.local-storage",
+            account: "key"
+        )
+
+        #expect(throws: LocalStorageEncryptionError.invalidKeyLength(16)) {
+            try manager.keyData()
+        }
+    }
+}
+
+private func assertRoutineMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let marker = "legacy routine \(UUID().uuidString)"
+    let url = root.appendingPathComponent("legacy-routines.json")
+    let legacy = [
+        normalized(marker): StoredRoutine(
+            name: marker,
+            steps: [AgentStep(id: "open", operation: .openApp, description: marker, appName: "Safari")]
+        )
+    ]
+    try JSONEncoder.prettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = RoutineStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.routine(named: marker).name == marker)
+    try expectEncryptedFile(url, hiding: marker)
+}
+
+private func assertWorkspaceMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let marker = "legacy workspace \(UUID().uuidString)"
+    let url = root.appendingPathComponent("legacy-workspaces.json")
+    let legacy = [
+        normalized(marker): StoredWorkspace(name: marker, apps: ["Safari"], urls: ["https://example.com/\(marker)"])
+    ]
+    try JSONEncoder.prettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = WorkspaceStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.workspace(named: marker).name == marker)
+    try expectEncryptedFile(url, hiding: marker)
+}
+
+private func assertClipboardHistoryMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let marker = "legacy clipboard \(UUID().uuidString)"
+    let url = root.appendingPathComponent("legacy-clipboard-history.json")
+    let legacy = [ClipboardHistoryItem(copiedAt: .fixture, text: marker)]
+    try JSONEncoder.iso8601PrettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = ClipboardHistoryStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.loadAll(now: .fixture).first?.text == marker)
+    try expectEncryptedFile(url, hiding: marker)
+}
+
+private func assertClipboardSettingsMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let url = root.appendingPathComponent("legacy-clipboard-settings.json")
+    let legacy = ClipboardHistorySettings(noticeDismissed: true, isEnabled: false)
+    try JSONEncoder.iso8601PrettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = ClipboardHistorySettingsStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.load() == legacy)
+    let raw = try Data(contentsOf: url)
+    #expect(raw.starts(with: LocalStorageEncryption.fileHeader))
+    #expect(raw.range(of: Data("\"noticeDismissed\"".utf8)) == nil)
+}
+
+private func assertSnippetMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let marker = "legacy snippet \(UUID().uuidString)"
+    let url = root.appendingPathComponent("legacy-snippets.json")
+    let legacy = [
+        ";legacy": StoredSnippet(trigger: ";legacy", expansion: marker, updatedAt: .fixture)
+    ]
+    try JSONEncoder.iso8601PrettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = SnippetStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.snippet(matchingTrigger: ";legacy").expansion == marker)
+    try expectEncryptedFile(url, hiding: marker)
+}
+
+private func assertRecentArtifactMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let marker = "legacy-artifact-\(UUID().uuidString).md"
+    let artifact = root.appendingPathComponent(marker)
+    try Data("artifact".utf8).write(to: artifact, options: .atomic)
+    let url = root.appendingPathComponent("legacy-recent-artifacts.json")
+    let legacy = [
+        RecentArtifact(path: artifact.path, title: marker, recordedAt: .fixture)
+    ]
+    try JSONEncoder.iso8601PrettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = RecentArtifactStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.loadAll(now: .fixture).first?.path == artifact.path)
+    try expectEncryptedFile(url, hiding: marker)
+}
+
+private func assertShortcutHistoryMigration(root: URL, encryption: LocalStorageEncryption) throws {
+    let marker = "legacy shortcut \(UUID().uuidString)"
+    let url = root.appendingPathComponent("legacy-shortcuts-run-history.json")
+    let legacy = [
+        normalized(marker): ShortcutRunHistoryRecord(
+            shortcutName: marker,
+            lastSuccessfulInvocationAt: .fixture
+        )
+    ]
+    try JSONEncoder.iso8601PrettySortedForTest.encode(legacy).write(to: url, options: .atomic)
+    let store = ShortcutRunHistoryStore(fileURL: url, encryption: encryption)
+
+    #expect(try store.hasCleanObservedSuccess(for: marker))
+    try expectEncryptedFile(url, hiding: marker)
+}
+
+private func testEncryption() -> LocalStorageEncryption {
+    LocalStorageEncryption(
+        keyManager: FixedLocalStorageKeyManager(bytes: Data(repeating: 0x42, count: 32))
+    )
+}
+
+private func expectEncryptedFile(_ url: URL, hiding plaintext: String) throws {
+    let raw = try Data(contentsOf: url)
+    #expect(raw.starts(with: LocalStorageEncryption.fileHeader))
+    #expect(raw.range(of: Data(plaintext.utf8)) == nil)
+}
+
+private struct FixedLocalStorageKeyManager: LocalStorageKeyManaging {
+    let bytes: Data
+
+    func keyData() throws -> Data {
+        bytes
+    }
+}
+
+private final class FakeKeychainSecretStore: KeychainSecretStoring, @unchecked Sendable {
+    private var values: [String: Data] = [:]
+    private(set) var savedData: Data?
+
+    func data(service: String, account: String) throws -> Data? {
+        values[key(service: service, account: account)]
+    }
+
+    func save(_ data: Data, service: String, account: String) throws {
+        values[key(service: service, account: account)] = data
+        savedData = data
+    }
+
+    func delete(service: String, account: String) throws {
+        values.removeValue(forKey: key(service: service, account: account))
+    }
+
+    private func key(service: String, account: String) -> String {
+        "\(service)\u{0}\(account)"
+    }
+}
+
+private extension Date {
+    static let fixture = Date(timeIntervalSince1970: 1_700_000_000)
+}
+
+private extension JSONEncoder {
+    static var prettySortedForTest: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+
+    static var iso8601PrettySortedForTest: JSONEncoder {
+        let encoder = prettySortedForTest
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }
+}
+
+private func normalized(_ value: String) -> String {
+    value
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        .lowercased()
+}
