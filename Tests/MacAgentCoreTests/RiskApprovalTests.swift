@@ -91,6 +91,8 @@ struct RiskApprovalTests {
             "local.instant.calculator": .tier0,
             "local.instant.clipboard-history": .tier0,
             "local.instant.snippet-expansion": .tier0,
+            "local.instant.recent-artifacts": .tier0,
+            "local.instant.running-app-switch": .tier1,
             "local.apps.open-allowlisted-app": .tier1,
             "local.browser.open-app-search-url": .tier1,
             "local.browser.open-url": .tier1,

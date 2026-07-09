@@ -110,6 +110,8 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case calculateUtility = "calculate_utility"
     case lookupClipboardHistory = "lookup_clipboard_history"
     case expandSnippet = "expand_snippet"
+    case switchRunningApp = "switch_running_app"
+    case lookupRecentArtifacts = "lookup_recent_artifacts"
     case clarify
     case unsupported
 
@@ -118,7 +120,9 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
             switch operation {
             case .calculateUtility,
                  .lookupClipboardHistory,
-                 .expandSnippet:
+                 .expandSnippet,
+                 .switchRunningApp,
+                 .lookupRecentArtifacts:
                 return false
             default:
                 return true

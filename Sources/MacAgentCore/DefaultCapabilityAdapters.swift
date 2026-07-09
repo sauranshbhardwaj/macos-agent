@@ -14,6 +14,8 @@ public enum DefaultCapabilityAdapters {
             CalculatorCapabilityAdapter(),
             ClipboardHistoryCapabilityAdapter(),
             SnippetExpansionCapabilityAdapter(),
+            RunningAppSwitchCapabilityAdapter(),
+            RecentArtifactsCapabilityAdapter(),
             OpenMediaResultCapabilityAdapter(),
             FinderSelectionCapabilityAdapter(),
             RevealInFinderCapabilityAdapter(),

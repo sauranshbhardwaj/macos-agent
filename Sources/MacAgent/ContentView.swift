@@ -489,6 +489,10 @@ private struct SavedItemsPanel: View {
             return "Clipboard history"
         case .expandSnippet:
             return "Expand snippet"
+        case .switchRunningApp:
+            return "Switch to \(step.appName ?? "app")"
+        case .lookupRecentArtifacts:
+            return "Recent artifacts"
         case .playMedia:
             return "Open \(step.mediaTitle ?? "music")"
         case .scanSelectLargestFiles:

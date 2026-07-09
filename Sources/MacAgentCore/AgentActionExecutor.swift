@@ -66,6 +66,8 @@ public final class AgentActionExecutor {
     private let webResearchSynthesizer: any WebResearchSynthesizing
     private let clipboardHistoryStore: ClipboardHistoryStore
     private let snippetStore: SnippetStore
+    private let runningAppSwitcher: any RunningAppSwitching
+    private let recentArtifactStore: RecentArtifactStore
     private let capabilityRegistry: CapabilityRegistry
     private let fileManager: FileManager
     private let now: () -> Date
@@ -93,6 +95,8 @@ public final class AgentActionExecutor {
         webResearchSynthesizer: (any WebResearchSynthesizing)? = nil,
         clipboardHistoryStore: ClipboardHistoryStore = ClipboardHistoryStore(),
         snippetStore: SnippetStore = SnippetStore(),
+        runningAppSwitcher: any RunningAppSwitching = WorkspaceRunningAppSwitcher(),
+        recentArtifactStore: RecentArtifactStore = RecentArtifactStore(),
         capabilityRegistry: CapabilityRegistry = .default,
         fileManager: FileManager = .default,
         now: @escaping () -> Date = Date.init
@@ -119,6 +123,8 @@ public final class AgentActionExecutor {
         self.webResearchSynthesizer = webResearchSynthesizer ?? EnvironmentWebResearchSynthesizer()
         self.clipboardHistoryStore = clipboardHistoryStore
         self.snippetStore = snippetStore
+        self.runningAppSwitcher = runningAppSwitcher
+        self.recentArtifactStore = recentArtifactStore
         self.capabilityRegistry = capabilityRegistry
         self.fileManager = fileManager
         self.now = now
@@ -192,6 +198,10 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .lookupClipboardHistory, plan: plan)
         case .snippetExpansion:
             return try previewCapability(for: .expandSnippet, plan: plan)
+        case .runningAppSwitch:
+            return try previewCapability(for: .switchRunningApp, plan: plan)
+        case .recentArtifacts:
+            return try previewCapability(for: .lookupRecentArtifacts, plan: plan)
         case .mediaOpen:
             return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
@@ -247,6 +257,10 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .lookupClipboardHistory, plan: resolvedPlan, log: log)
         case .snippetExpansion:
             return try await executeCapability(for: .expandSnippet, plan: resolvedPlan, log: log)
+        case .runningAppSwitch:
+            return try await executeCapability(for: .switchRunningApp, plan: resolvedPlan, log: log)
+        case .recentArtifacts:
+            return try await executeCapability(for: .lookupRecentArtifacts, plan: resolvedPlan, log: log)
         case .mediaOpen:
             return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
@@ -282,6 +296,8 @@ public final class AgentActionExecutor {
         case calculator
         case clipboardHistory
         case snippetExpansion
+        case runningAppSwitch
+        case recentArtifacts
         case mediaOpen
         case finderSelection
         case revealInFinder
@@ -324,6 +340,8 @@ public final class AgentActionExecutor {
              .calculator,
              .clipboardHistory,
              .snippetExpansion,
+             .runningAppSwitch,
+             .recentArtifacts,
              .mediaOpen,
              .finderSelection,
              .revealInFinder,
@@ -371,6 +389,10 @@ public final class AgentActionExecutor {
             return .clipboardHistory
         case .expandSnippet:
             return .snippetExpansion
+        case .switchRunningApp:
+            return .runningAppSwitch
+        case .lookupRecentArtifacts:
+            return .recentArtifacts
         case .playMedia:
             return .mediaOpen
         case .getFinderSelection:
@@ -624,6 +646,8 @@ public final class AgentActionExecutor {
             webResearchSynthesizer: webResearchSynthesizer,
             clipboardHistoryStore: clipboardHistoryStore,
             snippetStore: snippetStore,
+            runningAppSwitcher: runningAppSwitcher,
+            recentArtifactStore: recentArtifactStore,
             fileManager: fileManager,
             now: now,
             assessNestedPlan: { [weak self] plan in

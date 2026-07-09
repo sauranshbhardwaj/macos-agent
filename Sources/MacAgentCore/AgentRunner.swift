@@ -20,29 +20,34 @@ public final class AgentRunner {
     private let executor: AgentActionExecutor
     private let logStore: AgentLogStore
     private let approvalPolicy: RiskApprovalPolicy
+    private let recentArtifactStore: RecentArtifactStore?
 
     public init(
         planner: any Planning,
         executor: AgentActionExecutor = AgentActionExecutor(),
         logStore: AgentLogStore = AgentLogStore(),
-        approvalPolicy: RiskApprovalPolicy = .default
+        approvalPolicy: RiskApprovalPolicy = .default,
+        recentArtifactStore: RecentArtifactStore? = nil
     ) {
         self.plannerProvider = { planner }
         self.executor = executor
         self.logStore = logStore
         self.approvalPolicy = approvalPolicy
+        self.recentArtifactStore = recentArtifactStore
     }
 
     public init(
         plannerProvider: @escaping () throws -> any Planning,
         executor: AgentActionExecutor = AgentActionExecutor(),
         logStore: AgentLogStore = AgentLogStore(),
-        approvalPolicy: RiskApprovalPolicy = .default
+        approvalPolicy: RiskApprovalPolicy = .default,
+        recentArtifactStore: RecentArtifactStore? = nil
     ) {
         self.plannerProvider = plannerProvider
         self.executor = executor
         self.logStore = logStore
         self.approvalPolicy = approvalPolicy
+        self.recentArtifactStore = recentArtifactStore
     }
 
     public func prepare(command: String) async throws -> PreparedAgentRun {
@@ -115,8 +120,24 @@ public final class AgentRunner {
         }
 
         logStore.append(.confirm, confirmationMessage)
-        return try await executor.execute(plan: preparedRun.plan) { phase, message in
+        let result = try await executor.execute(plan: preparedRun.plan) { phase, message in
             self.logStore.append(phase, message)
+        }
+        recordRecentArtifacts(from: result)
+        return result
+    }
+
+    private func recordRecentArtifacts(from result: AgentRunResult) {
+        guard let recentArtifactStore else {
+            return
+        }
+        do {
+            let count = try recentArtifactStore.recordGeneratedArtifacts(from: result)
+            if count > 0 {
+                logStore.append(.observe, "Recorded \(count) recent artifact\(count == 1 ? "" : "s")")
+            }
+        } catch {
+            logStore.append(.observe, "Could not record recent artifacts: \(error.localizedDescription)")
         }
     }
 

@@ -38,6 +38,7 @@ final class AgentViewModel: ObservableObject {
     private let permissionReadinessService = PermissionReadinessService()
     private let routineStore = RoutineStore()
     private let workspaceStore = WorkspaceStore()
+    private let recentArtifactStore = RecentArtifactStore()
     private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
     private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
     private var clipboardHistoryTimer: Timer?
@@ -156,7 +157,13 @@ final class AgentViewModel: ObservableObject {
 
         do {
             let planner = try OpenAIPlanner()
-            let runner = AgentRunner(planner: planner, logStore: logStore)
+            let executor = AgentActionExecutor(recentArtifactStore: recentArtifactStore)
+            let runner = AgentRunner(
+                planner: planner,
+                executor: executor,
+                logStore: logStore,
+                recentArtifactStore: recentArtifactStore
+            )
             self.runner = runner
 
             let prepared = try await runner.prepare(command: command)
