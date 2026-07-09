@@ -21,6 +21,7 @@ struct ToolRegistryTests {
         #expect(registry.plannerDescription.contains("Play Jimmy Cooks by Drake on Apple Music"))
         #expect(registry.plannerDescription.contains("Spotify"))
         #expect(registry.plannerDescription.contains("Apple Music"))
+        #expect(!registry.plannerDescription.contains("calculate_utility"))
     }
 
     @Test

@@ -1,19 +1,45 @@
 import Foundation
 
+public enum PreparedPlanSource: String, Equatable, Sendable {
+    case planner
+    case instantResolver = "instant_resolver"
+
+    var planLogMessage: String {
+        switch self {
+        case .planner:
+            return "Sending command to planner"
+        case .instantResolver:
+            return "Resolved command locally"
+        }
+    }
+}
+
 @MainActor
 public final class AgentRunner {
-    private let planner: Planning
+    private let plannerProvider: () throws -> any Planning
     private let executor: AgentActionExecutor
     private let logStore: AgentLogStore
     private let approvalPolicy: RiskApprovalPolicy
 
     public init(
-        planner: Planning,
+        planner: any Planning,
         executor: AgentActionExecutor = AgentActionExecutor(),
         logStore: AgentLogStore = AgentLogStore(),
         approvalPolicy: RiskApprovalPolicy = .default
     ) {
-        self.planner = planner
+        self.plannerProvider = { planner }
+        self.executor = executor
+        self.logStore = logStore
+        self.approvalPolicy = approvalPolicy
+    }
+
+    public init(
+        plannerProvider: @escaping () throws -> any Planning,
+        executor: AgentActionExecutor = AgentActionExecutor(),
+        logStore: AgentLogStore = AgentLogStore(),
+        approvalPolicy: RiskApprovalPolicy = .default
+    ) {
+        self.plannerProvider = plannerProvider
         self.executor = executor
         self.logStore = logStore
         self.approvalPolicy = approvalPolicy
@@ -26,8 +52,22 @@ public final class AgentRunner {
         }
 
         logStore.reset()
-        logStore.append(.plan, "Sending command to planner")
+        logStore.append(.plan, PreparedPlanSource.planner.planLogMessage)
+        let planner = try plannerProvider()
         let plan = try await planner.plan(command: trimmed)
+        return try prepareResolvedPlan(plan)
+    }
+
+    public func prepare(
+        plan: AgentPlan,
+        source: PreparedPlanSource = .instantResolver
+    ) throws -> PreparedAgentRun {
+        logStore.reset()
+        logStore.append(.plan, source.planLogMessage)
+        return try prepareResolvedPlan(plan)
+    }
+
+    private func prepareResolvedPlan(_ plan: AgentPlan) throws -> PreparedAgentRun {
         logStore.append(.observe, "Received plan: \(plan.summary)")
         logStore.append(.validate, "Validating whitelist and supported operations")
         let preparedRun = try executor.prepare(plan: plan)

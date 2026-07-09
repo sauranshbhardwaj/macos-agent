@@ -99,7 +99,8 @@ struct PlannerBoundaryTests {
         let stepProperties = try #require(stepItems["properties"] as? [String: Any])
         let operation = try #require(stepProperties["operation"] as? [String: Any])
         #expect(operation["type"] as? String == "string")
-        #expect(operation["enum"] as? [String] == AgentOperation.allCases.map(\.rawValue))
+        #expect(operation["enum"] as? [String] == AgentOperation.plannerVisibleCases.map(\.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.calculateUtility.rawValue))
 
         let routineSteps = try #require(stepProperties["routineSteps"] as? [String: Any])
         #expect(routineSteps["type"] as? [String] == ["array", "null"])

@@ -434,6 +434,8 @@ private struct SavedItemsPanel: View {
             return "Open artifact"
         case .createLocalDraft:
             return "Create draft"
+        case .calculateUtility:
+            return "Calculate"
         case .playMedia:
             return "Open \(step.mediaTitle ?? "music")"
         case .scanSelectLargestFiles:

@@ -180,6 +180,8 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .openGeneratedArtifact, plan: plan)
         case .createLocalDraft:
             return try previewCapability(for: .createLocalDraft, plan: plan)
+        case .calculator:
+            return try previewCapability(for: .calculateUtility, plan: plan)
         case .mediaOpen:
             return try previewCapability(for: .playMedia, plan: plan)
         case .finderSelection:
@@ -229,6 +231,8 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .openGeneratedArtifact, plan: resolvedPlan, log: log)
         case .createLocalDraft:
             return try await executeCapability(for: .createLocalDraft, plan: resolvedPlan, log: log)
+        case .calculator:
+            return try await executeCapability(for: .calculateUtility, plan: resolvedPlan, log: log)
         case .mediaOpen:
             return try await executeCapability(for: .playMedia, plan: resolvedPlan, log: log)
         case .finderSelection:
@@ -261,6 +265,7 @@ public final class AgentActionExecutor {
         case openURL
         case openGeneratedArtifact
         case createLocalDraft
+        case calculator
         case mediaOpen
         case finderSelection
         case revealInFinder
@@ -300,6 +305,7 @@ public final class AgentActionExecutor {
              .openURL,
              .openGeneratedArtifact,
              .createLocalDraft,
+             .calculator,
              .mediaOpen,
              .finderSelection,
              .revealInFinder,
@@ -341,6 +347,8 @@ public final class AgentActionExecutor {
             return .openGeneratedArtifact
         case .createLocalDraft:
             return .createLocalDraft
+        case .calculateUtility:
+            return .calculator
         case .playMedia:
             return .mediaOpen
         case .getFinderSelection:

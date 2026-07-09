@@ -47,6 +47,8 @@ struct CapabilityRegistryTests {
         #expect(try registry.adapter(for: .openGeneratedArtifact) is OpenGeneratedArtifactCapabilityAdapter)
         #expect(try registry.adapter(for: .createLocalDraft).metadata.id == "local.files.create-local-draft")
         #expect(try registry.adapter(for: .createLocalDraft) is CreateLocalDraftCapabilityAdapter)
+        #expect(try registry.adapter(for: .calculateUtility).metadata.id == "local.instant.calculator")
+        #expect(try registry.adapter(for: .calculateUtility) is CalculatorCapabilityAdapter)
         #expect(try registry.adapter(for: .playMedia).metadata.id == "local.media.open-result")
         #expect(try registry.adapter(for: .playMedia) is OpenMediaResultCapabilityAdapter)
         #expect(try registry.adapter(for: .getFinderSelection).metadata.id == "local.finder.read-selection")
@@ -76,10 +78,13 @@ struct CapabilityRegistryTests {
             #expect(!metadata.description.isEmpty)
             #expect(metadata.version == "1.0")
             #expect(!metadata.operations.isEmpty)
-            #expect(!metadata.plannerTools.isEmpty)
             #expect(metadata.executorLocation == .localMac)
             #expect(CapabilityRiskTier.allCases.contains(metadata.defaultRiskTier))
-            #expect(metadata.operations.map(\.rawValue).sorted() == metadata.plannerTools.map(\.operation.rawValue).sorted())
+            if metadata.plannerTools.isEmpty {
+                #expect(metadata.id.hasPrefix("local.instant."))
+            } else {
+                #expect(metadata.operations.map(\.rawValue).sorted() == metadata.plannerTools.map(\.operation.rawValue).sorted())
+            }
 
             for tool in metadata.plannerTools {
                 #expect(!tool.name.isEmpty)

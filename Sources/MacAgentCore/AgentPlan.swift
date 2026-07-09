@@ -107,8 +107,20 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case openWorkspace = "open_workspace"
     case openGeneratedArtifact = "open_generated_artifact"
     case createLocalDraft = "create_local_draft"
+    case calculateUtility = "calculate_utility"
     case clarify
     case unsupported
+
+    public static var plannerVisibleCases: [AgentOperation] {
+        allCases.filter { operation in
+            switch operation {
+            case .calculateUtility:
+                return false
+            default:
+                return true
+            }
+        }
+    }
 }
 
 public enum MediaProvider: String, Codable, CaseIterable, Sendable {
@@ -300,7 +312,7 @@ public enum AgentPlanSchema {
             "id": ["type": "string"],
             "operation": [
                 "type": "string",
-                "enum": AgentOperation.allCases.map(\.rawValue)
+                "enum": AgentOperation.plannerVisibleCases.map(\.rawValue)
             ],
             "description": ["type": "string"],
             "inputPath": [
