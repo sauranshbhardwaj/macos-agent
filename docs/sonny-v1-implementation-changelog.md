@@ -602,7 +602,7 @@ Behavior preserved (required, no blanket claims):
 - Clipboard history ConcealedType/TransientType privacy filtering, Shortcuts process-level demotion behavior, running-app switcher launch restrictions, quick routine nested risk folding, and typed command-box instant routing from `feature/instant-utilities-shortcuts` remain covered by the regression suite.
 
 Architectural decisions / pitfalls discovered (required, write "none" if true):
-- Follow-up relevance is model-decided, not locally keyword-matched. Sonny always passes eligible prior-task context to the planner, and the prompt tells the model to use it only for clear corrections/refinements and ignore it for unrelated commands.
+- Follow-up relevance is model-decided, not locally keyword-matched. Sonny always passes eligible prior-task context to the planner, and the prompt specifically treats short correction phrases such as "use X instead" / "try Y" / "no, scan Z instead" as reusing the prior task's exact action with only the referenced field replaced. Complete standalone tasks still ignore prior context and plan normally.
 - Prior-task context is short-lived and last-task-only: 10-minute expiry, one stored snapshot, and rolling replacement after any newly resolved command, follow-up or unrelated.
 - Do not fold prior-task context into the user's raw command string. Keep the typed `Planning.plan(command:priorTaskContext:)` signature and separate prompt rendering so future planners and tests can see whether context was offered.
 - `OpenAIPlanner.defaultSystemPrompt(toolRegistry:)` now includes follow-up-correction instructions; `PlannerBoundaryTests` golden text was updated. Future prompt changes must keep the planner and golden tests in sync.
