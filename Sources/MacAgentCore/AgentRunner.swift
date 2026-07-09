@@ -50,7 +50,10 @@ public final class AgentRunner {
         self.recentArtifactStore = recentArtifactStore
     }
 
-    public func prepare(command: String) async throws -> PreparedAgentRun {
+    public func prepare(
+        command: String,
+        priorTaskContext: PriorTaskContext? = nil
+    ) async throws -> PreparedAgentRun {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw AgentExecutionError.emptyCommand
@@ -58,8 +61,11 @@ public final class AgentRunner {
 
         logStore.reset()
         logStore.append(.plan, PreparedPlanSource.planner.planLogMessage)
+        if priorTaskContext != nil {
+            logStore.append(.observe, "Short-lived prior task context available to planner")
+        }
         let planner = try plannerProvider()
-        let plan = try await planner.plan(command: trimmed)
+        let plan = try await planner.plan(command: trimmed, priorTaskContext: priorTaskContext)
         return try prepareResolvedPlan(plan)
     }
 

@@ -28,6 +28,7 @@ final class AgentViewModel: ObservableObject {
     @Published var approvalRequest: RiskApprovalRequest?
     @Published var showClipboardHistoryNotice: Bool = false
     @Published var clipboardHistoryEnabled: Bool = true
+    @Published var priorTaskContext: PriorTaskContext?
 
     let logStore = AgentLogStore()
 
@@ -44,9 +45,11 @@ final class AgentViewModel: ObservableObject {
     private let shortcutRunHistoryStore = ShortcutRunHistoryStore()
     private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
     private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
+    private let priorTaskContextStore = PriorTaskContextStore()
     private var clipboardHistoryTimer: Timer?
     private var clarificationAutoExecute = false
     private var isPushToTalkHotKeyDown = false
+    private var pendingCommandForPriorTaskContext: String?
 
     private enum VoiceRecordingTrigger {
         case button
@@ -88,6 +91,10 @@ final class AgentViewModel: ObservableObject {
 
     var isAwaitingApproval: Bool {
         approvalRequest != nil
+    }
+
+    var recentTaskAffordanceText: String? {
+        priorTaskContext?.shortDisplayText
     }
 
     var voiceButtonTitle: String {
@@ -158,8 +165,11 @@ final class AgentViewModel: ObservableObject {
             currentTask = nil
         }
 
+        let submittedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        let priorContextForPlanner = priorTaskContextStore.currentContext()
+        priorTaskContext = priorContextForPlanner
+
         do {
-            let submittedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
             let executor = makeExecutor()
             let runner: AgentRunner
             let prepared: PreparedAgentRun
@@ -183,7 +193,10 @@ final class AgentViewModel: ObservableObject {
                     logStore: logStore,
                     recentArtifactStore: recentArtifactStore
                 )
-                prepared = try await runner.prepare(command: submittedCommand)
+                prepared = try await runner.prepare(
+                    command: submittedCommand,
+                    priorTaskContext: priorContextForPlanner
+                )
             }
             self.runner = runner
 
@@ -197,6 +210,12 @@ final class AgentViewModel: ObservableObject {
                 clarificationAutoExecute = autoExecute || !dryRun
                 finalSummary = "Clarification needed before I can act."
                 logStore.append(.summarize, "Clarification needed: \(question)")
+                recordPriorTaskContext(
+                    command: submittedCommand,
+                    preparedRun: prepared,
+                    status: .clarificationNeeded,
+                    summary: finalSummary
+                )
                 return
             }
 
@@ -204,6 +223,12 @@ final class AgentViewModel: ObservableObject {
                 markAllSteps(.complete)
                 finalSummary = "Dry run complete. No files were written, no apps were opened, and no documents were converted."
                 logStore.append(.summarize, finalSummary)
+                recordPriorTaskContext(
+                    command: submittedCommand,
+                    preparedRun: prepared,
+                    status: .dryRun,
+                    summary: finalSummary
+                )
             } else {
                 let request = try runner.approvalRequest(for: prepared, logAssessment: true)
                 switch request.requirement {
@@ -211,18 +236,37 @@ final class AgentViewModel: ObservableObject {
                     break
                 case .lightweightConfirmation, .explicitApproval:
                     approvalRequest = request
+                    pendingCommandForPriorTaskContext = submittedCommand
                     finalSummary = "Approval needed before Sonny can act."
                     logStore.append(.confirm, "Approval required for \(request.assessment.effectiveTier.displayName)")
+                    recordPriorTaskContext(
+                        command: submittedCommand,
+                        preparedRun: prepared,
+                        status: .approvalNeeded,
+                        summary: finalSummary
+                    )
                     return
                 case .previewOnly:
                     markAllSteps(.complete)
                     finalSummary = "Preview complete. The current approval policy does not allow this action to run automatically."
                     logStore.append(.summarize, finalSummary)
+                    recordPriorTaskContext(
+                        command: submittedCommand,
+                        preparedRun: prepared,
+                        status: .prepared,
+                        summary: finalSummary
+                    )
                     return
                 case .refuse:
                     markAllSteps(.failed)
                     errorMessage = "Sonny refused this action under the current approval policy."
                     logStore.append(.summarize, "Refused by approval policy")
+                    recordPriorTaskContext(
+                        command: submittedCommand,
+                        preparedRun: prepared,
+                        status: .failed,
+                        summary: errorMessage ?? "Refused by approval policy"
+                    )
                     return
                 }
 
@@ -235,24 +279,55 @@ final class AgentViewModel: ObservableObject {
                 )
                 finalSummary = result.summary
                 suggestions = result.suggestions
+                recordPriorTaskContext(
+                    command: submittedCommand,
+                    preparedRun: prepared,
+                    status: .completed,
+                    summary: result.summary
+                )
                 refreshSavedItems()
             }
         } catch is CancellationError {
             markAllSteps(.canceled)
             finalSummary = "Canceled."
             logStore.append(.summarize, "Canceled by user")
+            if let preparedRun {
+                recordPriorTaskContext(
+                    command: submittedCommand,
+                    preparedRun: preparedRun,
+                    status: .canceled,
+                    summary: finalSummary
+                )
+            }
         } catch {
             markAllSteps(.failed)
             errorMessage = error.localizedDescription
             logStore.append(.summarize, "Stopped: \(error.localizedDescription)")
+            if let preparedRun {
+                recordPriorTaskContext(
+                    command: submittedCommand,
+                    preparedRun: preparedRun,
+                    status: .failed,
+                    summary: error.localizedDescription
+                )
+            }
         }
     }
 
     func cancelCurrentRun() {
         if isAwaitingApproval {
+            if let preparedRun, let pendingCommandForPriorTaskContext {
+                recordPriorTaskContext(
+                    command: pendingCommandForPriorTaskContext,
+                    preparedRun: preparedRun,
+                    status: .canceled,
+                    summary: "Approval canceled. No action was taken."
+                )
+            }
             approvalRequest = nil
             preparedRun = nil
             runner = nil
+            pendingCommandForPriorTaskContext = nil
             markAllSteps(.canceled)
             finalSummary = "Approval canceled. No action was taken."
             logStore.append(.summarize, "Approval canceled by user")
@@ -422,6 +497,7 @@ final class AgentViewModel: ObservableObject {
         approvalRequest = nil
         suggestions = []
         stepStatuses = [:]
+        priorTaskContext = nil
         voiceTranscript = ""
         isPreparingVoiceRecording = false
         isRecordingVoice = false
@@ -433,6 +509,8 @@ final class AgentViewModel: ObservableObject {
         refreshClipboardHistoryNotice()
         preparedRun = nil
         runner = nil
+        pendingCommandForPriorTaskContext = nil
+        priorTaskContextStore.clear()
         logStore.reset()
     }
 
@@ -618,21 +696,70 @@ final class AgentViewModel: ObservableObject {
             )
             finalSummary = result.summary
             suggestions = result.suggestions
+            if let pendingCommandForPriorTaskContext {
+                recordPriorTaskContext(
+                    command: pendingCommandForPriorTaskContext,
+                    preparedRun: preparedRun,
+                    status: .completed,
+                    summary: result.summary
+                )
+            }
+            pendingCommandForPriorTaskContext = nil
             refreshSavedItems()
         } catch is CancellationError {
             markAllSteps(.canceled)
             finalSummary = "Canceled."
             logStore.append(.summarize, "Canceled by user")
+            if let pendingCommandForPriorTaskContext {
+                recordPriorTaskContext(
+                    command: pendingCommandForPriorTaskContext,
+                    preparedRun: preparedRun,
+                    status: .canceled,
+                    summary: finalSummary
+                )
+            }
+            pendingCommandForPriorTaskContext = nil
         } catch RiskApprovalError.approvalRequired(let request) {
             markAllSteps(.pending)
             self.approvalRequest = request
             finalSummary = "Approval needed before Sonny can act."
             logStore.append(.confirm, "Approval required for \(request.assessment.effectiveTier.displayName)")
+            if let pendingCommandForPriorTaskContext {
+                recordPriorTaskContext(
+                    command: pendingCommandForPriorTaskContext,
+                    preparedRun: preparedRun,
+                    status: .approvalNeeded,
+                    summary: finalSummary
+                )
+            }
         } catch {
             markAllSteps(.failed)
             errorMessage = error.localizedDescription
             logStore.append(.summarize, "Stopped: \(error.localizedDescription)")
+            if let pendingCommandForPriorTaskContext {
+                recordPriorTaskContext(
+                    command: pendingCommandForPriorTaskContext,
+                    preparedRun: preparedRun,
+                    status: .failed,
+                    summary: error.localizedDescription
+                )
+            }
+            pendingCommandForPriorTaskContext = nil
         }
+    }
+
+    private func recordPriorTaskContext(
+        command: String,
+        preparedRun: PreparedAgentRun,
+        status: PriorTaskOutcomeStatus,
+        summary: String
+    ) {
+        priorTaskContextStore.record(
+            command: command,
+            plan: preparedRun.plan,
+            outcome: PriorTaskOutcome(status: status, summary: summary)
+        )
+        priorTaskContext = priorTaskContextStore.currentContext()
     }
 
     private func initializeStepStatuses(for plan: AgentPlan) {
@@ -657,7 +784,7 @@ enum AgentStepStatus: String {
 
 @MainActor
 private struct InstantOnlyFallbackPlanner: Planning {
-    func plan(command: String) async throws -> AgentPlan {
+    func plan(command: String, priorTaskContext: PriorTaskContext?) async throws -> AgentPlan {
         throw PlannerError.missingAPIKey
     }
 }

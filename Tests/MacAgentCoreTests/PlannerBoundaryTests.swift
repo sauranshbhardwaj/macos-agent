@@ -21,6 +21,9 @@ struct PlannerBoundaryTests {
         - Use only the fixed operation enum values.
         - Use registered tools only. Do not invent tools, commands, scripts, or APIs.
         - Include user-supplied paths exactly as written. Do not invent local file paths.
+        - A TRUSTED_PRIOR_TASK_CONTEXT_BEGIN/END message may appear before the current command. It is Sonny's short-lived record of only the immediately preceding task.
+        - Use prior task context only when the current command is clearly a correction or refinement of that prior task.
+        - If the current command is unrelated or ambiguous, ignore prior task context entirely and plan only from the current command.
         - Use null for unavailable fields.
         - If a folder, app name, URL, count, or output destination is required but missing or ambiguous, return exactly one clarify step with a short question.
         - For largest files, produce scan_select_largest_files then create_zip.
