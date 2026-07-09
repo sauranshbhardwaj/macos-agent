@@ -31,7 +31,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 | 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Complete (pending review) |
 | 4 | `feature/provider-media-playback` | §4A.4 | Complete (pending review) |
 | 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Complete (pending review) |
-| 6 | `feature/followup-usage-transparency` | §4A.8, §4A.9 | Not started |
+| 6 | `feature/followup-usage-transparency` | §4A.8, §4A.9 | Complete (pending review) |
 | 7 | `feature/local-storage-privacy-foundation` | §15.4 | Not started |
 | 8 | `feature/product-shell-shared-state` | §4A.1 (shell only), §6.2, §6.3, §17.3 | Not started |
 | 9 | `feature/hosted-agent-runtime-backend` | §6.1, §8, §9, §16, §21.2, §21.3, §6.19 | Not started |
@@ -542,5 +542,97 @@ Primary target: §4A.8, §4A.9
 Just completed: feature/instant-utilities-shortcuts — Sonny now resolves instant typed utility commands locally before planner fallback, has backend adapters/stores for calculator, clipboard history, snippets, running-app switch, recent artifacts, quick routine/workspace dispatch, and a planner-visible Shortcuts bridge with process-observed run-history demotion.
 Must preserve: instant commands bypass only `OpenAIPlanner.plan(command:)` and still use `AgentRunner`/`AgentActionExecutor` risk gating; calculator/clipboard/snippet/running-app/recent-artifact/quick-dispatch remain instant-only; `invoke_shortcut` remains planner-visible and instant-supported; clipboard ConcealedType/TransientType filtering happens before content reads; quick routines preserve nested tier 2+/tier 3 approval gates; running-app switching does not relax the `open_app` launch allowlist; typed command-box instant routing works without `OPENAI_API_KEY` while non-instant typed commands still fall back to the planner.
 Known pitfalls to avoid repeating: do not build launcher palette UI until quick-results-list wireframes are provided; do not create parallel confirmation/execution paths; do not treat `shortcuts` exit 0 as guaranteed internal Shortcut success; non-secret local JSON is acceptable for these stores, but branch #7 still owns broader storage/privacy hardening.
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
+### Branch: feature/followup-usage-transparency
+Status: complete
+Date: 2026-07-09
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §4A.8 complete for local task-scoped follow-up correction. §4A.9 complete for the local approximate usage indicator; hosted billing/account/entitlement-backed usage remains deferred to §16.4 and later roadmap branches.
+Files changed:
+- `Sources/MacAgent/AgentViewModel.swift`
+- `Sources/MacAgent/ContentView.swift`
+- `Sources/MacAgentCore/AgentActionExecutor.swift`
+- `Sources/MacAgentCore/AgentRunner.swift`
+- `Sources/MacAgentCore/OpenAIPlanner.swift`
+- `Sources/MacAgentCore/OpenAITranscriber.swift`
+- `Sources/MacAgentCore/PriorTaskContext.swift`
+- `Sources/MacAgentCore/TaskUsage.swift`
+- `Sources/MacAgentCore/WebResearchSynthesizer.swift`
+- `Tests/MacAgentCoreTests/AgentRunnerTests.swift`
+- `Tests/MacAgentCoreTests/ClipboardHistoryTests.swift`
+- `Tests/MacAgentCoreTests/InstantCommandResolverTests.swift`
+- `Tests/MacAgentCoreTests/OpenAIPlannerTests.swift`
+- `Tests/MacAgentCoreTests/OpenAITranscriberTests.swift`
+- `Tests/MacAgentCoreTests/PlannerBoundaryTests.swift`
+- `Tests/MacAgentCoreTests/PriorTaskContextTests.swift`
+- `Tests/MacAgentCoreTests/QuickDispatchTests.swift`
+- `Tests/MacAgentCoreTests/RunningAppAndRecentArtifactsTests.swift`
+- `Tests/MacAgentCoreTests/ShortcutsBridgeTests.swift`
+- `Tests/MacAgentCoreTests/SnippetExpansionTests.swift`
+- `Tests/MacAgentCoreTests/WebResearchSynthesizerTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 165 tests in 20 suites.
+
+Behavior added:
+- Added `PriorTaskContext`, `PriorTaskContextStore`, and a last-task-only rolling context snapshot containing previous command text, plan summary, compact step summaries, outcome status/summary, and timestamp.
+- Added 10-minute bounded expiry for prior-task context; recording any newly resolved task replaces the old snapshot, so there is no growing history and no persistent chat memory.
+- Changed `Planning.plan(command:)` to `Planning.plan(command:priorTaskContext:)` and added `AgentRunner.prepare(command:priorTaskContext:)`, so prior-task context reaches the planner as typed context instead of being concatenated into the raw command string.
+- Updated `OpenAIPlanner` prompt construction with explicit follow-up instructions: use prior-task context only when the new command is clearly a refinement/correction of the prior task, otherwise ignore it and plan the new command as fresh.
+- Wired `AgentViewModel` to offer eligible prior-task context for the next typed command, capture final/failed/clarification/approval-canceled outcomes, and expose `recentTaskAffordanceText` for the existing popover.
+- Added a passive recent-task affordance under the command input in the existing popover, showing the short prior task summary when context is eligible.
+- Added `TaskUsageRecorder`, `TaskUsageSummary`, `AIUsageRecord`, and parser/estimator helpers for task-scoped local usage accounting.
+- Captured real OpenAI Responses API token usage for `OpenAIPlanner` and `OpenAIWebResearchSynthesizer` when `usage.input_tokens`, `usage.output_tokens`, and `usage.total_tokens` are present.
+- Added clearly marked fallback token estimates for planner/web synthesis when Responses `usage` is missing or null; reported and estimated tokens remain separate in data and UI.
+- Captured `OpenAITranscriber` usage as reported token counts or reported audio duration seconds; duration usage is kept as seconds instead of converted into invented token counts.
+- Threaded one per-task usage recorder through `AgentViewModel`, `OpenAIPlanner`, `AgentActionExecutor`, `EnvironmentWebResearchSynthesizer`, `OpenAIWebResearchSynthesizer`, and `OpenAITranscriber`, preserving voice transcription usage into the auto-started task.
+- Added a compact, non-alarming local usage badge in the existing popover run-details area, including a truthful no-AI-requests state for instant-only/local tasks.
+
+Behavior preserved (required, no blanket claims):
+- Corrected follow-up plans still flow through the same `AgentRunner.prepare` -> `AgentActionExecutor.prepare` -> risk assessment -> approval -> `AgentActionExecutor.execute` pipeline as fresh planner commands; tier 2+ corrected plans still pause for approval before execution.
+- Non-instant typed commands still fall back to `OpenAIPlanner`, use the strict schema decoder, receive tool-registry prompt context, and preserve the existing prepared-run preview, approval, execution, logging, and artifact-recording flow.
+- Instant typed commands still bypass only `OpenAIPlanner.plan(command:priorTaskContext:)`; they still use `AgentRunner.prepare(plan:source:)`, adapter validation, risk gating, and execution, and instant-only calculator coverage now asserts zero AI requests.
+- The prior branch's six `FailingPlanner: Planning` test conformances still compile with the new `priorTaskContext` parameter: instant command resolver, clipboard history, snippet expansion, running-app/recent-artifact, quick dispatch, and Shortcuts bridge tests.
+- `AgentPlanDecoder.decodeStrict`, `AgentPlanSchema.responseFormat()`, `AgentStep`, and planner response-format schema stayed unchanged; follow-up correction is prompt/context only, not a new operation or plan field.
+- Untrusted web observed-content delimiter handling from the web research branch remains scoped to externally fetched content; prior-task context is Sonny's own first-party state and did not reuse those delimiters.
+- Clipboard history ConcealedType/TransientType privacy filtering, Shortcuts process-level demotion behavior, running-app switcher launch restrictions, quick routine nested risk folding, and typed command-box instant routing from `feature/instant-utilities-shortcuts` remain covered by the regression suite.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- Follow-up relevance is model-decided, not locally keyword-matched. Sonny always passes eligible prior-task context to the planner, and the prompt tells the model to use it only for clear corrections/refinements and ignore it for unrelated commands.
+- Prior-task context is short-lived and last-task-only: 10-minute expiry, one stored snapshot, and rolling replacement after any newly resolved command, follow-up or unrelated.
+- Do not fold prior-task context into the user's raw command string. Keep the typed `Planning.plan(command:priorTaskContext:)` signature and separate prompt rendering so future planners and tests can see whether context was offered.
+- `OpenAIPlanner.defaultSystemPrompt(toolRegistry:)` now includes follow-up-correction instructions; `PlannerBoundaryTests` golden text was updated. Future prompt changes must keep the planner and golden tests in sync.
+- `OpenAIPlanner`, `OpenAIWebResearchSynthesizer`, and `OpenAITranscriber` constructors now accept a `TaskUsageRecording` recorder; `OpenAITranscriber.TranscriptionResult` also carries optional usage. Future OpenAI-backed features should thread this recorder instead of creating independent counters.
+- Usage records are task-local and approximate. Responses API reported token counts are authoritative when present, missing/null usage falls back to a rough text estimate marked `.estimated`, and transcription duration is reported as audio seconds rather than tokenized.
+- Usage is recorded for successful HTTP responses before strict planner/note decoding finishes, so a malformed but billable model response can still count locally.
+- The usage badge lives in the existing `NSPopover` only as an interim placement. Do not build a fake Command Center here; migrate this surface when branch #8 (`feature/product-shell-shared-state`) creates the shared-state product shell/Command Center foundation.
+- Local-only usage transparency must not be treated as billing, entitlements, plan limits, rate limits, or account state. Those remain hosted/backend concerns for later roadmap branches.
+
+Known limitations / deferred scope:
+- No account creation, subscription state, entitlement checks, billing portal, plan limits, hosted usage history, or server-side metering were added.
+- The usage indicator is local and approximate; estimated tokens use a simple text-length heuristic when OpenAI usage is absent.
+- The recent-task affordance is passive and tied to the existing command input only; no persistent chat memory, long-term preference memory, or multi-turn conversation transcript was added.
+- The existing popover placement for recent-task and usage UI is intentionally minimal. Fuller Command Center placement is deferred to branch #8's shared-state shell work and later billing/Command Center branches.
+- Tests use fixture URL protocols and fake planners/transcribers only; no live OpenAI calls are made in the suite.
+Open questions for the next chat (required, write "none" if true): none.
+
+Next branch: `feature/local-storage-privacy-foundation` (§15.4), hardening local storage and privacy foundations before hosted backend/auth/account work.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/local-storage-privacy-foundation
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §15.4
+
+Just completed: feature/followup-usage-transparency — Sonny now has short-lived task-scoped follow-up correction, planner-visible prior-task context, local per-task AI usage recording for planner/web synthesis/transcription, and minimal existing-popover affordances for recent task and usage.
+Must preserve: corrected follow-up plans use the exact normal `AgentRunner`/`AgentActionExecutor` prepare, risk, approval, and execute pipeline; tier 2+ corrected plans still pause for approval; non-instant typed commands still fall back to strict-schema `OpenAIPlanner`; instant commands still bypass only planner calls and can show zero AI requests; prior-task context remains 10-minute, last-task-only, and non-persistent; planner context stays typed via `Planning.plan(command:priorTaskContext:)`; reported and estimated usage tokens stay separate; transcription duration remains seconds, not invented tokens; usage UI remains local-only and non-billing.
+Known pitfalls to avoid repeating: do not concatenate prior-task context into raw command text; keep `OpenAIPlanner.defaultSystemPrompt` and `PlannerBoundaryTests` golden text in sync after prompt edits; update all `Planning` conformances when changing planner signatures; thread `TaskUsageRecording` through new OpenAI-backed features instead of adding parallel counters; do not build Command Center UI before branch #8 creates the shared-state product shell; do not add account/subscription/entitlement/billing logic on local-only branches.
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
