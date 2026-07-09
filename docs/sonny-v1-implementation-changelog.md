@@ -30,7 +30,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 | 2 | `feature/local-risk-approval-engine` | §10, §11, §11.1A | Complete (pending review) |
 | 3 | `feature/web-research-app-foundation` | §4A.2, §4A.3 | Complete (pending review) |
 | 4 | `feature/provider-media-playback` | §4A.4 | Complete (pending review) |
-| 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Not started |
+| 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Complete (pending review) |
 | 6 | `feature/followup-usage-transparency` | §4A.8, §4A.9 | Not started |
 | 7 | `feature/local-storage-privacy-foundation` | §15.4 | Not started |
 | 8 | `feature/product-shell-shared-state` | §4A.1 (shell only), §6.2, §6.3, §17.3 | Not started |
@@ -445,5 +445,102 @@ Primary target: §4A.6, §4A.7
 Just completed: feature/provider-media-playback — Sonny now has provider-aware Spotify and Apple Music playback seams, fixture-tested match resolution, fixed single-blocker diagnosis precedence, route-aware dry-run previews, and universal fallback to existing result opening while production providers remain intentionally unavailable.
 Must preserve: fixed playback failure precedence through `MediaPlaybackFailureDiagnosis.diagnose(_:)`; generalized `MediaSearchMatcher` reuse; Spotify and Apple Music unavailable defaults with fallback-open behavior; existing Apple Music iTunes result/search fallback and Spotify URI/search fallback; `play_media` tier 1 auto-run/no escalation behavior; unchanged `play_media` planner-facing schema; no live OAuth/MusicKit/provider network calls until credentials and developer access are explicitly wired.
 Known pitfalls to avoid repeating: provider `preview(_:)` is synchronous/non-throwing by design and must never make live calls; do not duplicate media scoring logic instead of reusing `MediaSearchMatcher`; do not introduce UI clicking/typing/scrolling app control for provider media; new capability-specific risk behavior must go through adapter `assessRisk(plan:context:)` and `AgentRunner`; production Spotify and Apple Music wiring remain deferred-before-v1 known limitations, not permanent stubs.
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
+### Branch: feature/instant-utilities-shortcuts
+Status: complete
+Date: 2026-07-09
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §4A.6 and §4A.7 complete for backend/adapter logic and existing command-box smoke-test routing. Launcher palette UI is explicitly deferred pending quick-results-list wireframes.
+Files changed:
+- `Sources/MacAgent/AgentViewModel.swift`
+- `Sources/MacAgent/ContentView.swift`
+- `Sources/MacAgentCore/AgentActionExecutor.swift`
+- `Sources/MacAgentCore/AgentPlan.swift`
+- `Sources/MacAgentCore/AgentRunner.swift`
+- `Sources/MacAgentCore/AutomationStores.swift`
+- `Sources/MacAgentCore/CalculatorCapabilityAdapter.swift`
+- `Sources/MacAgentCore/CalculatorService.swift`
+- `Sources/MacAgentCore/CapabilityAdapter.swift`
+- `Sources/MacAgentCore/ClipboardHistoryCapabilityAdapter.swift`
+- `Sources/MacAgentCore/ClipboardHistoryService.swift`
+- `Sources/MacAgentCore/DefaultCapabilityAdapters.swift`
+- `Sources/MacAgentCore/InstantCommandResolver.swift`
+- `Sources/MacAgentCore/InvokeShortcutCapabilityAdapter.swift`
+- `Sources/MacAgentCore/OpenAIPlanner.swift`
+- `Sources/MacAgentCore/RecentArtifactStore.swift`
+- `Sources/MacAgentCore/RecentArtifactsCapabilityAdapter.swift`
+- `Sources/MacAgentCore/RunningAppService.swift`
+- `Sources/MacAgentCore/RunningAppSwitchCapabilityAdapter.swift`
+- `Sources/MacAgentCore/ShortcutsBridgeService.swift`
+- `Sources/MacAgentCore/SnippetExpansionCapabilityAdapter.swift`
+- `Sources/MacAgentCore/SnippetSaveCapabilityAdapter.swift`
+- `Sources/MacAgentCore/SnippetStore.swift`
+- `Tests/MacAgentCoreTests/CapabilityRegistryTests.swift`
+- `Tests/MacAgentCoreTests/ClipboardHistoryTests.swift`
+- `Tests/MacAgentCoreTests/InstantCommandResolverTests.swift`
+- `Tests/MacAgentCoreTests/PlannerBoundaryTests.swift`
+- `Tests/MacAgentCoreTests/QuickDispatchTests.swift`
+- `Tests/MacAgentCoreTests/RiskApprovalTests.swift`
+- `Tests/MacAgentCoreTests/RunningAppAndRecentArtifactsTests.swift`
+- `Tests/MacAgentCoreTests/ShortcutsBridgeTests.swift`
+- `Tests/MacAgentCoreTests/SnippetExpansionTests.swift`
+- `Tests/MacAgentCoreTests/ToolRegistryTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 155 tests in 18 suites.
+
+Behavior added:
+- Added `InstantCommandResolver` and `AgentRunner.prepare(plan:source:)` so local instant commands can skip `OpenAIPlanner.plan(command:)` while still flowing through `AgentActionExecutor.prepare`, risk assessment, approval gating, execution, logs, previews, and summaries.
+- Added tier 0 calculator/unit conversion with local parsing and Foundation measurement conversions; exact `calc`, `calculate`, `=`, bare arithmetic, and simple conversion commands resolve locally.
+- Added clipboard history lookup with injectable pasteboard monitoring, ConcealedType/TransientType privacy filtering before content reads, dedupe, 100-item / 7-day / per-item text caps, local JSON storage, and a one-time existing-shell notice/toggle before default-on monitoring activates.
+- Added exact-trigger snippet expansion from local JSON storage, plus the typed smoke-test command `snippet save ;trigger = expansion`; expansion is tier 0, while saving a snippet is tier 2 because it writes local JSON.
+- Added running-app search/switch over injected `NSWorkspace.runningApplications`, tier 1, without using the launch allowlist because it only activates already-running apps and cannot launch new apps.
+- Added recent-artifacts tracking for successful non-dry-run generated files and tier 0 lookup; opening a recent artifact reuses the existing `open_generated_artifact` tier 1 adapter path.
+- Added quick routine/workspace dispatch for known saved names through trusted local `run_routine` / `open_workspace` plans; saved routine nested risk is still folded by `RunRoutineCapabilityAdapter` and tier 2+/tier 3 steps still pause through `AgentRunner`.
+- Added `invoke_shortcut` as both planner-visible and instant-resolver-supported, using the fixed `/usr/bin/shortcuts run <name>` template through injectable seams, `.clarify` for unknown/misspelled names, and local JSON run history that demotes a Sonny-observed successful Shortcut from tier 2 to tier 1 until a later process-level failure clears it.
+- Wired the existing command box in `AgentViewModel` to try `InstantCommandResolver` before falling back to `OpenAIPlanner`, allowing instant typed utilities to work without `OPENAI_API_KEY` while preserving planner fallback for non-instant commands.
+
+Behavior preserved (required, no blanket claims):
+- Non-instant typed commands still fall back to `OpenAIPlanner` and use the existing strict schema, tool registry prompt, prepared-run preview, approval, execution, and logging flow.
+- Existing voice transcription still requires `OPENAI_API_KEY` because voice uses `OpenAITranscriber`; only typed instant commands can run without planner credentials.
+- Existing planner-visible routine/workspace tools remain unchanged: `run_routine` and `open_workspace` are reused for quick dispatch instead of adding parallel execution paths.
+- Existing approval behavior is preserved: tier 0 and tier 1 actions auto-run under the default policy, tier 2 requires lightweight confirmation, tier 3 requires explicit approval, and tier 4 refuses.
+- Existing app launch allowlist remains in force for `open_app`; the new running-app switcher does not relax app-launch restrictions.
+- Existing recent artifact recording only happens after successful execution through `AgentRunner`, never from dry runs or failed runs.
+- Existing provider media playback, web research, document conversion, Finder, URL-opening, routine, workspace, local draft, and generated-artifact adapters continue to register through the default capability registry and pass the full regression suite.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- Instant utility commands are local-resolver-only: calculator, clipboard lookup, snippet save/expand, running-app switch, recent-artifact lookup/open resolution, and quick routine/workspace dispatch are intentionally excluded from planner tools to avoid reintroducing the model round trip. `invoke_shortcut` is different because it belongs to §4A.7, so it is both planner-visible and instant-supported.
+- Planner bypass means bypassing only `OpenAIPlanner.plan(command:)`; instant plans still use the same `AgentRunner` and adapter risk pipeline. Do not add a second confirmation/execution path for future instant UI work.
+- Shortcut demotion is based on a process-level "Sonny-observed successful invocation." The `shortcuts` CLI can exit 0 even if a Shortcut action silently fails internally, so Sonny cannot guarantee internal Shortcut success until a richer success signal exists.
+- Clipboard privacy filtering must check pasteboard types and skip `org.nspasteboard.ConcealedType` / `org.nspasteboard.TransientType` before reading copied text content.
+- Running-app switching deliberately does not use `MacAppCatalog` because switching only activates already-running apps; launching new apps remains allowlist-gated through `open_app`.
+- Snippet creation is intentionally minimal and typed for smoke testing; it is tier 2 because it mutates local JSON even though snippet expansion is tier 0.
+
+Known limitations / deferred scope:
+- Launcher palette UI is deferred pending the quick-results-list wireframes for instant utilities. This is a sequenced follow-up, not a product gap or forgotten branch scope; the current branch intentionally stops at backend/adapter logic plus existing command-box smoke routing.
+- There is no full snippet management UI yet beyond the typed `snippet save ;trigger = expansion` command.
+- Automated tests avoid live Shortcuts execution and real clipboard side effects by using injectable seams; production Shortcuts behavior still depends on the user's installed Shortcuts and the macOS `shortcuts` CLI.
+- Exposing Sonny capabilities as Shortcuts actions via App Intents remains out of scope.
+Open questions for the next chat (required, write "none" if true): none.
+
+Next branch: `feature/followup-usage-transparency` (§4A.8, §4A.9), adding follow-up correction and usage transparency on top of the now-shared command/adapter/risk spine.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/followup-usage-transparency
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §4A.8, §4A.9
+
+Just completed: feature/instant-utilities-shortcuts — Sonny now resolves instant typed utility commands locally before planner fallback, has backend adapters/stores for calculator, clipboard history, snippets, running-app switch, recent artifacts, quick routine/workspace dispatch, and a planner-visible Shortcuts bridge with process-observed run-history demotion.
+Must preserve: instant commands bypass only `OpenAIPlanner.plan(command:)` and still use `AgentRunner`/`AgentActionExecutor` risk gating; calculator/clipboard/snippet/running-app/recent-artifact/quick-dispatch remain instant-only; `invoke_shortcut` remains planner-visible and instant-supported; clipboard ConcealedType/TransientType filtering happens before content reads; quick routines preserve nested tier 2+/tier 3 approval gates; running-app switching does not relax the `open_app` launch allowlist; typed command-box instant routing works without `OPENAI_API_KEY` while non-instant typed commands still fall back to the planner.
+Known pitfalls to avoid repeating: do not build launcher palette UI until quick-results-list wireframes are provided; do not create parallel confirmation/execution paths; do not treat `shortcuts` exit 0 as guaranteed internal Shortcut success; non-secret local JSON is acceptable for these stores, but branch #7 still owns broader storage/privacy hardening.
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.

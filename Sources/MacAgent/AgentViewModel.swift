@@ -38,7 +38,10 @@ final class AgentViewModel: ObservableObject {
     private let permissionReadinessService = PermissionReadinessService()
     private let routineStore = RoutineStore()
     private let workspaceStore = WorkspaceStore()
+    private let snippetStore = SnippetStore()
     private let recentArtifactStore = RecentArtifactStore()
+    private let shortcutCatalog: any ShortcutCatalogProviding = ProcessShortcutCatalog()
+    private let shortcutRunHistoryStore = ShortcutRunHistoryStore()
     private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
     private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
     private var clipboardHistoryTimer: Timer?
@@ -72,7 +75,7 @@ final class AgentViewModel: ObservableObject {
         if isAwaitingApproval {
             return !isRunning && preparedRun != nil && runner != nil
         }
-        return !isRunning && !isTranscribingVoice && hasAPIKey && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !isRunning && !isTranscribingVoice && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var canCancel: Bool {
@@ -125,8 +128,8 @@ final class AgentViewModel: ObservableObject {
         }
 
         guard canSubmit else {
-            if !hasAPIKey {
-                errorMessage = "OPENAI_API_KEY is not set. Export it before launching Sonny, then relaunch the app."
+            if command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                errorMessage = "Enter a natural-language command first."
             }
             return
         }
@@ -156,17 +159,34 @@ final class AgentViewModel: ObservableObject {
         }
 
         do {
-            let planner = try OpenAIPlanner()
-            let executor = AgentActionExecutor(recentArtifactStore: recentArtifactStore)
-            let runner = AgentRunner(
-                planner: planner,
-                executor: executor,
-                logStore: logStore,
-                recentArtifactStore: recentArtifactStore
-            )
+            let submittedCommand = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            let executor = makeExecutor()
+            let runner: AgentRunner
+            let prepared: PreparedAgentRun
+
+            if let resolution = makeInstantCommandResolver().resolve(command: submittedCommand) {
+                runner = AgentRunner(
+                    planner: InstantOnlyFallbackPlanner(),
+                    executor: executor,
+                    logStore: logStore,
+                    recentArtifactStore: recentArtifactStore
+                )
+                switch resolution {
+                case .plan(let localPlan), .clarify(let localPlan):
+                    prepared = try runner.prepare(plan: localPlan, source: .instantResolver)
+                }
+            } else {
+                let planner = try OpenAIPlanner()
+                runner = AgentRunner(
+                    planner: planner,
+                    executor: executor,
+                    logStore: logStore,
+                    recentArtifactStore: recentArtifactStore
+                )
+                prepared = try await runner.prepare(command: submittedCommand)
+            }
             self.runner = runner
 
-            let prepared = try await runner.prepare(command: command)
             preparedRun = prepared
             plan = prepared.plan
             previews = prepared.previews
@@ -437,6 +457,27 @@ final class AgentViewModel: ObservableObject {
         clipboardHistoryTimer = nil
     }
 
+    private func makeInstantCommandResolver() -> InstantCommandResolver {
+        InstantCommandResolver(
+            snippetStore: snippetStore,
+            recentArtifactStore: recentArtifactStore,
+            routineStore: routineStore,
+            workspaceStore: workspaceStore,
+            shortcutCatalog: shortcutCatalog
+        )
+    }
+
+    private func makeExecutor() -> AgentActionExecutor {
+        AgentActionExecutor(
+            routineStore: routineStore,
+            workspaceStore: workspaceStore,
+            snippetStore: snippetStore,
+            recentArtifactStore: recentArtifactStore,
+            shortcutCatalog: shortcutCatalog,
+            shortcutRunHistoryStore: shortcutRunHistoryStore
+        )
+    }
+
     private func startVoiceRecording(trigger: VoiceRecordingTrigger) {
         guard canUseVoice else {
             if !hasAPIKey {
@@ -612,4 +653,11 @@ enum AgentStepStatus: String {
     case complete
     case failed
     case canceled
+}
+
+@MainActor
+private struct InstantOnlyFallbackPlanner: Planning {
+    func plan(command: String) async throws -> AgentPlan {
+        throw PlannerError.missingAPIKey
+    }
 }

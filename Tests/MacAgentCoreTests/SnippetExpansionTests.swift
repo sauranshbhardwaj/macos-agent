@@ -57,6 +57,75 @@ struct SnippetExpansionTests {
     }
 
     @Test
+    func snippetSaveCommandUsesTierTwoRunnerPathThenEnablesExactExpansion() async throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = SnippetStore(fileURL: root.appendingPathComponent("snippets.json"))
+        let resolver = InstantCommandResolver(snippetStore: store)
+
+        guard case .plan(let savePlan) = resolver.resolve(command: "snippet save ;sig = Best, Sonny") else {
+            Issue.record("Expected snippet save command to resolve locally.")
+            return
+        }
+
+        #expect(savePlan.steps.map(\.operation) == [.saveSnippet])
+        #expect(savePlan.steps[0].searchQuery == ";sig")
+        #expect(savePlan.steps[0].draftContent == "Best, Sonny")
+
+        let executor = AgentActionExecutor(
+            snippetStore: store,
+            now: { Date(timeIntervalSince1970: 123) }
+        )
+        let runner = AgentRunner(planner: FailingPlanner(), executor: executor)
+        let prepared = try runner.prepare(plan: savePlan, source: .instantResolver)
+        #expect(prepared.previews.first?.title == "Save snippet")
+
+        let request = try runner.approvalRequest(for: prepared)
+        #expect(request.assessment.effectiveTier == .tier2)
+        #expect(request.requirement == .lightweightConfirmation)
+        #expect(request.requirement != .autoRun)
+
+        do {
+            _ = try await runner.execute(prepared)
+            Issue.record("Expected snippet save to pause for tier 2 approval.")
+        } catch RiskApprovalError.approvalRequired(let approvalRequest) {
+            #expect(approvalRequest.requirement == .lightweightConfirmation)
+            #expect(approvalRequest.assessment.effectiveTier == .tier2)
+        } catch {
+            Issue.record("Expected approvalRequired, got \(error).")
+        }
+
+        #expect(try store.findExactTrigger(";sig") == nil)
+
+        let result = try await runner.execute(
+            prepared,
+            approvalDecision: .approved(.tier2),
+            confirmationMessage: "Test approved snippet save"
+        )
+        #expect(result.summary == "Saved snippet ;sig.")
+        #expect(try store.snippet(matchingTrigger: ";sig").expansion == "Best, Sonny")
+
+        guard case .plan(let expansionPlan) = resolver.resolve(command: ";sig") else {
+            Issue.record("Expected saved snippet trigger to resolve after save.")
+            return
+        }
+        #expect(expansionPlan.steps.map(\.operation) == [.expandSnippet])
+    }
+
+    @Test
+    func snippetSaveCommandClarifiesWhenTriggerOrExpansionIsMissing() {
+        let resolver = InstantCommandResolver()
+
+        guard case .clarify(let clarifyPlan) = resolver.resolve(command: "snippet save ;sig") else {
+            Issue.record("Expected malformed snippet save command to ask for clarification.")
+            return
+        }
+
+        #expect(clarifyPlan.steps.map(\.operation) == [.clarify])
+        #expect(clarifyPlan.steps[0].question == "Use the format snippet save ;trigger = expansion.")
+    }
+
+    @Test
     func snippetExpansionUsesTierZeroRunnerPath() async throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -43,6 +43,10 @@ public struct InstantCommandResolver: Sendable {
             return .plan(clipboardHistoryPlan(query: query))
         }
 
+        if let snippetSave = snippetSaveResolution(in: command) {
+            return snippetSave
+        }
+
         if let quickDispatch = quickDispatchResolution(in: command) {
             return quickDispatch
         }
@@ -86,6 +90,32 @@ public struct InstantCommandResolver: Sendable {
     private struct ShortcutLaunchRequest {
         var name: String
         var input: String?
+    }
+
+    private func snippetSaveResolution(in command: String) -> InstantCommandResolution? {
+        let lowered = command.lowercased()
+        let prefixes = ["snippet save", "save snippet"]
+        for prefix in prefixes {
+            if lowered == prefix {
+                return .clarify(snippetSaveClarificationPlan())
+            }
+            if lowered.hasPrefix("\(prefix) ") {
+                let body = String(command.dropFirst(prefix.count))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let delimiter = body.range(of: "=") else {
+                    return .clarify(snippetSaveClarificationPlan())
+                }
+                let trigger = String(body[..<delimiter.lowerBound])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let expansion = String(body[delimiter.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trigger.isEmpty, !expansion.isEmpty else {
+                    return .clarify(snippetSaveClarificationPlan())
+                }
+                return .plan(saveSnippetPlan(trigger: trigger, expansion: expansion))
+            }
+        }
+        return nil
     }
 
     private func quickDispatchResolution(in command: String) -> InstantCommandResolution? {
@@ -488,6 +518,37 @@ public struct InstantCommandResolver: Sendable {
                     operation: .expandSnippet,
                     description: "Expand snippet \(snippet.trigger).",
                     searchQuery: snippet.trigger
+                )
+            ]
+        )
+    }
+
+    private func saveSnippetPlan(trigger: String, expansion: String) -> AgentPlan {
+        AgentPlan(
+            summary: "Save snippet \(trigger).",
+            requiresConfirmation: true,
+            steps: [
+                AgentStep(
+                    id: "snippet-save",
+                    operation: .saveSnippet,
+                    description: "Save snippet \(trigger).",
+                    searchQuery: trigger,
+                    draftContent: expansion
+                )
+            ]
+        )
+    }
+
+    private func snippetSaveClarificationPlan() -> AgentPlan {
+        AgentPlan(
+            summary: "Clarification needed.",
+            requiresConfirmation: false,
+            steps: [
+                AgentStep(
+                    id: "clarify-snippet-save",
+                    operation: .clarify,
+                    description: "Ask for snippet trigger and expansion.",
+                    question: "Use the format snippet save ;trigger = expansion."
                 )
             ]
         )

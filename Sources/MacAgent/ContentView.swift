@@ -487,6 +487,8 @@ private struct SavedItemsPanel: View {
             return "Calculate"
         case .lookupClipboardHistory:
             return "Clipboard history"
+        case .saveSnippet:
+            return "Save snippet"
         case .expandSnippet:
             return "Expand snippet"
         case .switchRunningApp:

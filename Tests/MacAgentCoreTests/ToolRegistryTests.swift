@@ -26,6 +26,7 @@ struct ToolRegistryTests {
         #expect(!registry.plannerDescription.contains("calculate_utility"))
         #expect(!registry.plannerDescription.contains("lookup_clipboard_history"))
         #expect(!registry.plannerDescription.contains("expand_snippet"))
+        #expect(!registry.plannerDescription.contains("save_snippet"))
         #expect(!registry.plannerDescription.contains("switch_running_app"))
         #expect(!registry.plannerDescription.contains("lookup_recent_artifacts"))
     }

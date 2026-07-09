@@ -106,6 +106,7 @@ struct PlannerBoundaryTests {
         #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.calculateUtility.rawValue))
         #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.lookupClipboardHistory.rawValue))
         #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.expandSnippet.rawValue))
+        #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.saveSnippet.rawValue))
         #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.switchRunningApp.rawValue))
         #expect(!(operation["enum"] as? [String] ?? []).contains(AgentOperation.lookupRecentArtifacts.rawValue))
         #expect((operation["enum"] as? [String] ?? []).contains(AgentOperation.invokeShortcut.rawValue))

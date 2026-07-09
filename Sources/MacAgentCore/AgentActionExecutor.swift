@@ -212,6 +212,8 @@ public final class AgentActionExecutor {
             return try previewCapability(for: .calculateUtility, plan: plan)
         case .clipboardHistory:
             return try previewCapability(for: .lookupClipboardHistory, plan: plan)
+        case .snippetSave:
+            return try previewCapability(for: .saveSnippet, plan: plan)
         case .snippetExpansion:
             return try previewCapability(for: .expandSnippet, plan: plan)
         case .runningAppSwitch:
@@ -273,6 +275,8 @@ public final class AgentActionExecutor {
             return try await executeCapability(for: .calculateUtility, plan: resolvedPlan, log: log)
         case .clipboardHistory:
             return try await executeCapability(for: .lookupClipboardHistory, plan: resolvedPlan, log: log)
+        case .snippetSave:
+            return try await executeCapability(for: .saveSnippet, plan: resolvedPlan, log: log)
         case .snippetExpansion:
             return try await executeCapability(for: .expandSnippet, plan: resolvedPlan, log: log)
         case .runningAppSwitch:
@@ -315,6 +319,7 @@ public final class AgentActionExecutor {
         case createLocalDraft
         case calculator
         case clipboardHistory
+        case snippetSave
         case snippetExpansion
         case runningAppSwitch
         case recentArtifacts
@@ -360,6 +365,7 @@ public final class AgentActionExecutor {
              .createLocalDraft,
              .calculator,
              .clipboardHistory,
+             .snippetSave,
              .snippetExpansion,
              .runningAppSwitch,
              .recentArtifacts,
@@ -409,6 +415,8 @@ public final class AgentActionExecutor {
             return .calculator
         case .lookupClipboardHistory:
             return .clipboardHistory
+        case .saveSnippet:
+            return .snippetSave
         case .expandSnippet:
             return .snippetExpansion
         case .switchRunningApp:
@@ -635,6 +643,9 @@ public final class AgentActionExecutor {
             }
             if plan.steps.contains(where: { [.saveRoutine, .createWorkspace].contains($0.operation) }) {
                 return "Edit or replace the saved routine/workspace manually."
+            }
+            if plan.steps.contains(where: { $0.operation == .saveSnippet }) {
+                return "Edit or delete the saved snippet manually."
             }
             return "Delete generated local files manually if needed."
         case .tier3:

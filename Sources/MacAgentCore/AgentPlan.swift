@@ -116,6 +116,7 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
     case calculateUtility = "calculate_utility"
     case lookupClipboardHistory = "lookup_clipboard_history"
     case expandSnippet = "expand_snippet"
+    case saveSnippet = "save_snippet"
     case switchRunningApp = "switch_running_app"
     case lookupRecentArtifacts = "lookup_recent_artifacts"
     case invokeShortcut = "invoke_shortcut"
@@ -128,6 +129,7 @@ public enum AgentOperation: String, Codable, CaseIterable, Sendable {
             case .calculateUtility,
                  .lookupClipboardHistory,
                  .expandSnippet,
+                 .saveSnippet,
                  .switchRunningApp,
                  .lookupRecentArtifacts:
                 return false
