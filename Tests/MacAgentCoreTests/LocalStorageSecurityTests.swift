@@ -177,6 +177,70 @@ struct LocalStorageSecurityTests {
             try manager.keyData()
         }
     }
+
+    @Test
+    func localDataDeletionServiceRemovesAllStoreFilesAndToleratesMissingFiles() throws {
+        let root = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let encryption = testEncryption()
+        let fileURLs = try createAllLocalStoreFiles(root: root, encryption: encryption)
+        let service = LocalDataDeletionService(fileURLs: fileURLs)
+
+        let result = try service.deleteAllLocalData()
+
+        #expect(result == LocalDataDeletionResult(deletedFileCount: 7, missingFileCount: 0))
+        for fileURL in fileURLs {
+            #expect(!FileManager.default.fileExists(atPath: fileURL.path))
+        }
+
+        let secondResult = try service.deleteAllLocalData()
+        #expect(secondResult == LocalDataDeletionResult(deletedFileCount: 0, missingFileCount: 7))
+    }
+}
+
+private func createAllLocalStoreFiles(root: URL, encryption: LocalStorageEncryption) throws -> [URL] {
+    let routineStore = RoutineStore(fileURL: root.appendingPathComponent("routines.json"), encryption: encryption)
+    let workspaceStore = WorkspaceStore(fileURL: root.appendingPathComponent("workspaces.json"), encryption: encryption)
+    let clipboardStore = ClipboardHistoryStore(fileURL: root.appendingPathComponent("clipboard-history.json"), encryption: encryption)
+    let clipboardSettingsStore = ClipboardHistorySettingsStore(
+        fileURL: root.appendingPathComponent("clipboard-history-settings.json"),
+        encryption: encryption
+    )
+    let snippetStore = SnippetStore(fileURL: root.appendingPathComponent("snippets.json"), encryption: encryption)
+    let recentArtifactStore = RecentArtifactStore(
+        fileURL: root.appendingPathComponent("recent-artifacts.json"),
+        encryption: encryption
+    )
+    let shortcutRunHistoryStore = ShortcutRunHistoryStore(
+        fileURL: root.appendingPathComponent("shortcuts-run-history.json"),
+        encryption: encryption
+    )
+
+    try routineStore.save(
+        StoredRoutine(
+            name: "Delete Me",
+            steps: [AgentStep(id: "open", operation: .openApp, description: "Open Safari.", appName: "Safari")]
+        )
+    )
+    try workspaceStore.save(StoredWorkspace(name: "Delete Workspace", apps: ["Safari"], urls: []))
+    try clipboardStore.record("delete clipboard", copiedAt: .fixture)
+    try clipboardSettingsStore.save(ClipboardHistorySettings(noticeDismissed: true, isEnabled: true))
+    try snippetStore.save(StoredSnippet(trigger: ";delete", expansion: "delete snippet", updatedAt: .fixture))
+
+    let artifact = root.appendingPathComponent("delete-artifact.md")
+    try Data("artifact".utf8).write(to: artifact, options: .atomic)
+    try recentArtifactStore.record(path: artifact.path, recordedAt: .fixture)
+    try shortcutRunHistoryStore.recordSuccess(shortcutName: "Delete Shortcut", at: .fixture)
+
+    return [
+        routineStore.fileURL,
+        workspaceStore.fileURL,
+        clipboardStore.fileURL,
+        clipboardSettingsStore.fileURL,
+        snippetStore.fileURL,
+        recentArtifactStore.fileURL,
+        shortcutRunHistoryStore.fileURL
+    ]
 }
 
 private func assertRoutineMigration(root: URL, encryption: LocalStorageEncryption) throws {

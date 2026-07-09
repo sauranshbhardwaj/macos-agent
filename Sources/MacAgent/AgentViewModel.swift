@@ -30,6 +30,7 @@ final class AgentViewModel: ObservableObject {
     @Published var clipboardHistoryEnabled: Bool = true
     @Published var priorTaskContext: PriorTaskContext?
     @Published var taskUsageSummary: TaskUsageSummary = .empty
+    @Published var localDataDeletionStatusMessage: String?
 
     let logStore = AgentLogStore()
 
@@ -46,6 +47,7 @@ final class AgentViewModel: ObservableObject {
     private let shortcutRunHistoryStore = ShortcutRunHistoryStore()
     private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
     private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
+    private let localDataDeletionService = LocalDataDeletionService()
     private let priorTaskContextStore = PriorTaskContextStore()
     private let taskUsageRecorder = TaskUsageRecorder()
     private var clipboardHistoryTimer: Timer?
@@ -471,6 +473,29 @@ final class AgentViewModel: ObservableObject {
         }
     }
 
+    func deleteLocalData() {
+        guard !isRunning else {
+            errorMessage = "Stop the current run before deleting local data."
+            return
+        }
+
+        do {
+            stopClipboardHistoryMonitoring()
+            let result = try localDataDeletionService.deleteAllLocalData()
+            clearInMemoryLocalDataState()
+            let noun = result.deletedFileCount == 1 ? "local data file" : "local data files"
+            let message = "Deleted \(result.deletedFileCount) \(noun)."
+            errorMessage = nil
+            localDataDeletionStatusMessage = message
+            finalSummary = message
+            logStore.append(.observe, message)
+        } catch {
+            let message = "Could not delete local data: \(error.localizedDescription)"
+            localDataDeletionStatusMessage = message
+            errorMessage = message
+        }
+    }
+
     func runRoutineWidget(_ routine: StoredRoutine) {
         command = "Run my \(routine.name) routine."
         dryRun = false
@@ -509,6 +534,7 @@ final class AgentViewModel: ObservableObject {
         previews = []
         finalSummary = ""
         errorMessage = nil
+        localDataDeletionStatusMessage = nil
         clarificationQuestion = nil
         clarificationAnswer = ""
         clarificationAutoExecute = false
@@ -533,6 +559,28 @@ final class AgentViewModel: ObservableObject {
         priorTaskContextStore.clear()
         taskUsageRecorder.reset()
         logStore.reset()
+    }
+
+    private func clearInMemoryLocalDataState() {
+        plan = nil
+        previews = []
+        suggestions = []
+        approvalRequest = nil
+        stepStatuses = [:]
+        priorTaskContext = nil
+        taskUsageSummary = .empty
+        clarificationQuestion = nil
+        clarificationAnswer = ""
+        clarificationAutoExecute = false
+        preparedRun = nil
+        runner = nil
+        pendingCommandForPriorTaskContext = nil
+        preserveUsageForNextStart = false
+        priorTaskContextStore.clear()
+        taskUsageRecorder.reset()
+        logStore.reset()
+        refreshSavedItems()
+        refreshClipboardHistoryNotice()
     }
 
     private func startClipboardHistoryMonitoring() {
