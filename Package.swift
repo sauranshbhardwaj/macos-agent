@@ -34,6 +34,11 @@ let package = Package(
             name: "MacAgentCoreTests",
             dependencies: ["MacAgentCore"],
             path: "Tests/MacAgentCoreTests"
+        ),
+        .testTarget(
+            name: "MacAgentTests",
+            dependencies: ["MacAgent", "MacAgentCore"],
+            path: "Tests/MacAgentTests"
         )
     ]
 )

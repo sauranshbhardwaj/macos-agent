@@ -29,9 +29,15 @@ public struct ShortcutRunHistoryRecord: Codable, Equatable, Sendable {
 public struct ShortcutRunHistoryStore: @unchecked Sendable {
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -75,7 +81,15 @@ public struct ShortcutRunHistoryStore: @unchecked Sendable {
             return [:]
         }
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder.shortcutHistoryISO8601.decode([String: ShortcutRunHistoryRecord].self, from: data)
+        let decoded = try encryption.decode(
+            [String: ShortcutRunHistoryRecord].self,
+            from: data,
+            decoder: .shortcutHistoryISO8601
+        )
+        if decoded.wasLegacyPlaintext {
+            try write(decoded.value)
+        }
+        return decoded.value
     }
 
     private func write(_ records: [String: ShortcutRunHistoryRecord]) throws {
@@ -83,7 +97,7 @@ public struct ShortcutRunHistoryStore: @unchecked Sendable {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.shortcutHistoryPrettySorted.encode(records)
+        let data = try encryption.encode(records, encoder: .shortcutHistoryPrettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }

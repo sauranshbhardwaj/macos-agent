@@ -25,9 +25,15 @@ public struct RecentArtifactStore: @unchecked Sendable {
 
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -75,8 +81,15 @@ public struct RecentArtifactStore: @unchecked Sendable {
             return []
         }
         let data = try Data(contentsOf: fileURL)
-        let decoded = try JSONDecoder.recentArtifactISO8601.decode([RecentArtifact].self, from: data)
-        return capped(decoded.sorted { $0.recordedAt > $1.recordedAt }, now: now)
+        let decoded = try encryption.decode(
+            [RecentArtifact].self,
+            from: data,
+            decoder: .recentArtifactISO8601
+        )
+        if decoded.wasLegacyPlaintext {
+            try write(decoded.value)
+        }
+        return capped(decoded.value.sorted { $0.recordedAt > $1.recordedAt }, now: now)
     }
 
     public func recent(matching rawQuery: String? = nil, limit: Int = 10, now: Date = Date()) throws -> [RecentArtifact] {
@@ -160,7 +173,7 @@ public struct RecentArtifactStore: @unchecked Sendable {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.recentArtifactPrettySorted.encode(artifacts)
+        let data = try encryption.encode(artifacts, encoder: .recentArtifactPrettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }

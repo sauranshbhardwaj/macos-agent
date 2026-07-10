@@ -41,9 +41,15 @@ public struct ClipboardHistoryStore {
 
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -73,8 +79,15 @@ public struct ClipboardHistoryStore {
             return []
         }
         let data = try Data(contentsOf: fileURL)
-        let decoded = try JSONDecoder.clipboardISO8601.decode([ClipboardHistoryItem].self, from: data)
-        return capped(decoded.sorted { $0.copiedAt > $1.copiedAt }, now: now)
+        let decoded = try encryption.decode(
+            [ClipboardHistoryItem].self,
+            from: data,
+            decoder: .clipboardISO8601
+        )
+        if decoded.wasLegacyPlaintext {
+            try write(decoded.value)
+        }
+        return capped(decoded.value.sorted { $0.copiedAt > $1.copiedAt }, now: now)
     }
 
     public func recent(matching rawQuery: String? = nil, limit: Int = 10, now: Date = Date()) throws -> [ClipboardHistoryItem] {
@@ -119,7 +132,7 @@ public struct ClipboardHistoryStore {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.clipboardPrettySorted.encode(items)
+        let data = try encryption.encode(items, encoder: .clipboardPrettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }
@@ -127,9 +140,15 @@ public struct ClipboardHistoryStore {
 public struct ClipboardHistorySettingsStore {
     public let fileURL: URL
     private let fileManager: FileManager
+    private let encryption: LocalStorageEncryption
 
-    public init(fileURL: URL? = nil, fileManager: FileManager = .default) {
+    public init(
+        fileURL: URL? = nil,
+        fileManager: FileManager = .default,
+        encryption: LocalStorageEncryption = .shared
+    ) {
         self.fileManager = fileManager
+        self.encryption = encryption
         if let fileURL {
             self.fileURL = fileURL
         } else {
@@ -143,7 +162,15 @@ public struct ClipboardHistorySettingsStore {
             return ClipboardHistorySettings()
         }
         let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder.clipboardISO8601.decode(ClipboardHistorySettings.self, from: data)
+        let decoded = try encryption.decode(
+            ClipboardHistorySettings.self,
+            from: data,
+            decoder: .clipboardISO8601
+        )
+        if decoded.wasLegacyPlaintext {
+            try save(decoded.value)
+        }
+        return decoded.value
     }
 
     public func save(_ settings: ClipboardHistorySettings) throws {
@@ -151,7 +178,7 @@ public struct ClipboardHistorySettingsStore {
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let data = try JSONEncoder.clipboardPrettySorted.encode(settings)
+        let data = try encryption.encode(settings, encoder: .clipboardPrettySorted)
         try data.write(to: fileURL, options: .atomic)
     }
 }

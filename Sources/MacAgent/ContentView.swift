@@ -330,6 +330,7 @@ private struct DryRunToggle: View {
 
 private struct SystemStatusPanel: View {
     @ObservedObject var viewModel: AgentViewModel
+    @State private var showDeleteLocalDataConfirmation = false
 
     var body: some View {
         Panel(title: "Status", systemImage: "slider.horizontal.3") {
@@ -365,6 +366,64 @@ private struct SystemStatusPanel: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 248)
+
+                Rectangle()
+                    .fill(SonnyTheme.border)
+                    .frame(height: 1)
+
+                localDataDeletionControl
+            }
+        }
+        .confirmationDialog(
+            "Delete Sonny Local Data?",
+            isPresented: $showDeleteLocalDataConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Local Data", role: .destructive) {
+                viewModel.deleteLocalData()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This deletes saved routines, workspaces, clipboard history, snippets, recent artifacts, Shortcut run history, and clipboard settings. Generated files and API keys are not deleted.")
+        }
+    }
+
+    private var localDataDeletionControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "trash")
+                    .font(SonnyType.icon(14))
+                    .foregroundStyle(SonnyTheme.danger)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Local data")
+                        .font(SonnyType.caption)
+                        .foregroundStyle(SonnyTheme.text)
+                    Text("Saved routines, workspaces, clipboard history, snippets, recent artifacts, Shortcut run history, and clipboard settings.")
+                        .font(SonnyType.micro)
+                        .foregroundStyle(SonnyTheme.muted)
+                        .lineSpacing(1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 8)
+
+                Button {
+                    showDeleteLocalDataConfirmation = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(SonnyButtonStyle(tone: .danger, width: 96))
+                .disabled(viewModel.isRunning)
+                .help("Delete local Sonny data")
+            }
+
+            if let message = viewModel.localDataDeletionStatusMessage {
+                Label(message, systemImage: message.hasPrefix("Deleted") ? "checkmark.circle" : "exclamationmark.triangle")
+                    .font(SonnyType.micro)
+                    .foregroundStyle(message.hasPrefix("Deleted") ? SonnyTheme.accent : SonnyTheme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
