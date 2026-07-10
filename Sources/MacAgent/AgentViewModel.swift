@@ -148,6 +148,22 @@ final class AgentViewModel: ObservableObject {
         approvalRequest != nil
     }
 
+    var activeTaskCount: Int {
+        isRunning || isAwaitingApproval ? 1 : 0
+    }
+
+    var hasTaskActivity: Bool {
+        isRunning
+            || isAwaitingApproval
+            || plan != nil
+            || !previews.isEmpty
+            || !finalSummary.isEmpty
+            || errorMessage != nil
+            || clarificationQuestion != nil
+            || taskUsageSummary.requestCount > 0
+            || !logStore.events.isEmpty
+    }
+
     var recentTaskAffordanceText: String? {
         priorTaskContext?.shortDisplayText
     }

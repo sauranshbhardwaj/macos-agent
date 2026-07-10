@@ -3,7 +3,12 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var viewModel: AgentViewModel
-    @FocusState private var commandFocused: Bool
+    let openCommandCenter: () -> Void
+
+    init(viewModel: AgentViewModel, openCommandCenter: @escaping () -> Void = {}) {
+        self.viewModel = viewModel
+        self.openCommandCenter = openCommandCenter
+    }
 
     var body: some View {
         ZStack {
@@ -22,30 +27,12 @@ struct ContentView: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 header
-                commandInput
-                controls
+                AgentCommandComposerView(viewModel: viewModel, autoFocus: true)
                 if viewModel.showClipboardHistoryNotice {
                     ClipboardHistoryNotice(viewModel: viewModel)
                 }
                 SavedItemsPanel(viewModel: viewModel)
-
-                if viewModel.isPreparingVoiceRecording || viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
-                    VoiceStatusPanel(viewModel: viewModel)
-                }
-
-                if viewModel.isRunning {
-                    BusyPanel(logStore: viewModel.logStore)
-                }
-
-                if let error = viewModel.errorMessage {
-                    ErrorBanner(message: error)
-                }
-
-                if let question = viewModel.clarificationQuestion {
-                    ClarificationPanel(viewModel: viewModel, question: question)
-                }
-
-                RunDetailsView(viewModel: viewModel, logStore: viewModel.logStore)
+                AgentTaskActivityView(viewModel: viewModel, showsStartupWhenEmpty: true)
             }
             .padding(20)
 
@@ -64,7 +51,6 @@ struct ContentView: View {
         .foregroundStyle(SonnyTheme.text)
         .tint(SonnyTheme.accent)
         .onAppear {
-            commandFocused = true
             viewModel.refreshPermissions()
             viewModel.refreshSavedItems()
             viewModel.refreshClipboardHistoryNotice()
@@ -85,6 +71,12 @@ struct ContentView: View {
                     .foregroundStyle(SonnyTheme.muted)
             }
             Spacer()
+            Button(action: openCommandCenter) {
+                Label("Command Center", systemImage: "rectangle.split.2x1")
+            }
+            .buttonStyle(SonnyButtonStyle(tone: .secondary))
+            .help("Open the Sonny Command Center")
+
             Button {
                 viewModel.togglePermissionPanel()
             } label: {
@@ -102,90 +94,114 @@ struct ContentView: View {
             .help("Quit")
         }
     }
+}
 
-    private var commandInput: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Ask Sonny")
-                .font(SonnyType.eyebrow)
-                .foregroundStyle(SonnyTheme.muted)
-            TextField("Open Safari, zip files, convert docs...", text: $viewModel.command)
-                .textFieldStyle(.plain)
-                .font(SonnyType.command)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 11)
-                .background(SonnyTheme.input)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(commandFocused ? SonnyTheme.accent.opacity(0.72) : SonnyTheme.border, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .disabled(viewModel.isRunning)
-                .focused($commandFocused)
-                .submitLabel(.go)
-                .onSubmit {
-                    viewModel.start()
-                }
+struct AgentCommandComposerView: View {
+    @ObservedObject var viewModel: AgentViewModel
+    let autoFocus: Bool
+    @FocusState private var commandFocused: Bool
 
-            if let recentTask = viewModel.recentTaskAffordanceText {
-                RecentTaskAffordance(text: recentTask)
-            }
-
-            if !viewModel.voiceTranscript.isEmpty {
-                Label("Voice command received", systemImage: "waveform")
-                    .font(SonnyType.caption)
-                    .foregroundStyle(SonnyTheme.muted)
-            }
-        }
+    init(viewModel: AgentViewModel, autoFocus: Bool = false) {
+        self.viewModel = viewModel
+        self.autoFocus = autoFocus
     }
 
-    private var controls: some View {
-        HStack(spacing: 8) {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ask Sonny")
+                    .font(SonnyType.eyebrow)
+                    .foregroundStyle(SonnyTheme.muted)
+                TextField("Open Safari, zip files, convert docs...", text: $viewModel.command)
+                    .textFieldStyle(.plain)
+                    .font(SonnyType.command)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(SonnyTheme.input)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(
+                                commandFocused ? SonnyTheme.accent.opacity(0.72) : SonnyTheme.border,
+                                lineWidth: 1
+                            )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .disabled(viewModel.isRunning)
+                    .focused($commandFocused)
+                    .submitLabel(.go)
+                    .onSubmit {
+                        viewModel.start()
+                    }
+
+                if let recentTask = viewModel.recentTaskAffordanceText {
+                    RecentTaskAffordance(text: recentTask)
+                }
+
+                if !viewModel.voiceTranscript.isEmpty {
+                    Label("Voice command received", systemImage: "waveform")
+                        .font(SonnyType.caption)
+                        .foregroundStyle(SonnyTheme.muted)
+                }
+            }
+
             HStack(spacing: 8) {
-                DryRunToggle(isOn: $viewModel.dryRun)
-                    .disabled(viewModel.isRunning || viewModel.isAwaitingApproval)
+                HStack(spacing: 8) {
+                    DryRunToggle(isOn: $viewModel.dryRun)
+                        .disabled(viewModel.isRunning || viewModel.isAwaitingApproval)
+
+                    Button {
+                        viewModel.toggleVoiceRecording()
+                    } label: {
+                        Label(viewModel.voiceButtonTitle, systemImage: viewModel.voiceButtonIcon)
+                    }
+                    .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
+                    .buttonStyle(
+                        SonnyButtonStyle(
+                            tone: viewModel.isRecordingVoice ? .danger : .secondary,
+                            width: 86
+                        )
+                    )
+                    .help("Click to speak, or hold Control-Option-Space")
+
+                    HotKeyHint(title: viewModel.voiceHotKeyReady ? "Ctrl-Opt-Space" : "Unavailable")
+                }
+                .frame(width: 320, alignment: .leading)
+
+                Spacer(minLength: 12)
+
+                if viewModel.canCancel {
+                    Button {
+                        viewModel.cancelCurrentRun()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 86))
+                } else {
+                    Button {
+                        viewModel.reset()
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(viewModel.isRunning)
+                    .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 80))
+                }
 
                 Button {
-                    viewModel.toggleVoiceRecording()
+                    viewModel.start()
                 } label: {
-                    Label(viewModel.voiceButtonTitle, systemImage: viewModel.voiceButtonIcon)
+                    Label(viewModel.primaryButtonTitle, systemImage: viewModel.primaryButtonIcon)
                 }
-                .disabled(!viewModel.canUseVoice && !viewModel.isRecordingVoice)
-                .buttonStyle(SonnyButtonStyle(tone: viewModel.isRecordingVoice ? .danger : .secondary, width: 86))
-                .help("Click to speak, or hold Control-Option-Space")
-
-                HotKeyHint(title: viewModel.voiceHotKeyReady ? "Ctrl-Opt-Space" : "Unavailable")
+                .keyboardShortcut(.return, modifiers: [])
+                .disabled(!viewModel.canSubmit)
+                .buttonStyle(SonnyButtonStyle(tone: .primary, width: 92))
             }
-            .frame(width: 320, alignment: .leading)
-
-            Spacer(minLength: 12)
-
-            if viewModel.canCancel {
-                Button {
-                    viewModel.cancelCurrentRun()
-                } label: {
-                    Label("Cancel", systemImage: "xmark.circle")
-                }
-                .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 86))
-            } else {
-                Button {
-                    viewModel.reset()
-                } label: {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
-                }
-                .disabled(viewModel.isRunning)
-                .buttonStyle(SonnyButtonStyle(tone: .secondary, width: 80))
-            }
-
-            Button {
-                viewModel.start()
-            } label: {
-                Label(viewModel.primaryButtonTitle, systemImage: viewModel.primaryButtonIcon)
-            }
-            .keyboardShortcut(.return, modifiers: [])
-            .disabled(!viewModel.canSubmit)
-            .buttonStyle(SonnyButtonStyle(tone: .primary, width: 92))
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity)
+        .onAppear {
+            if autoFocus {
+                commandFocused = true
+            }
+        }
     }
 }
 
@@ -539,7 +555,7 @@ private struct SavedItemsPanel: View {
                         SavedItem(
                             title: routine.name,
                             subtitle: "\(routine.steps.count) step\(routine.steps.count == 1 ? "" : "s")",
-                            details: routine.steps.prefix(4).map(routineStepLabel),
+                            details: routine.steps.prefix(4).map(AgentActivityPresentation.operationTitle),
                             actionTitle: "Run",
                             actionIcon: "play",
                             action: { viewModel.runRoutineWidget(routine) }
@@ -565,71 +581,6 @@ private struct SavedItemsPanel: View {
                     }
                 )
             }
-        }
-    }
-
-    private func routineStepLabel(_ step: AgentStep) -> String {
-        switch step.operation {
-        case .openApp:
-            return "Open \(step.appName ?? "app")"
-        case .openAppSearchURL:
-            return "Open search"
-        case .openURL:
-            return "Open \(step.targetURL ?? "URL")"
-        case .openGeneratedArtifact:
-            return "Open artifact"
-        case .createLocalDraft:
-            return "Create draft"
-        case .calculateUtility:
-            return "Calculate"
-        case .lookupClipboardHistory:
-            return "Clipboard history"
-        case .saveSnippet:
-            return "Save snippet"
-        case .expandSnippet:
-            return "Expand snippet"
-        case .switchRunningApp:
-            return "Switch to \(step.appName ?? "app")"
-        case .lookupRecentArtifacts:
-            return "Recent artifacts"
-        case .invokeShortcut:
-            return "Run \(step.shortcutName ?? "Shortcut")"
-        case .playMedia:
-            return "Open \(step.mediaTitle ?? "music")"
-        case .scanSelectLargestFiles:
-            return "Find largest files"
-        case .createZip:
-            return "Create zip"
-        case .scanDocx:
-            return "Find DOCX files"
-        case .convertDocxToPDF:
-            return "Convert DOCX to PDF"
-        case .openHackerNews:
-            return "Open Hacker News"
-        case .fetchHNHeadlines:
-            return "Fetch HN headlines"
-        case .writeMarkdown:
-            return "Write Markdown"
-        case .webToMarkdown:
-            return "Web to Markdown"
-        case .getFinderSelection:
-            return "Read Finder selection"
-        case .revealInFinder:
-            return "Reveal in Finder"
-        case .showPermissionReadiness:
-            return "Check status"
-        case .saveRoutine:
-            return "Save routine"
-        case .runRoutine:
-            return "Run routine"
-        case .createWorkspace:
-            return "Create workspace"
-        case .openWorkspace:
-            return "Open workspace"
-        case .clarify:
-            return "Ask clarification"
-        case .unsupported:
-            return "Unsupported step"
         }
     }
 
@@ -706,9 +657,41 @@ private struct SavedColumn: View {
     }
 }
 
+struct AgentTaskActivityView: View {
+    @ObservedObject var viewModel: AgentViewModel
+    let showsStartupWhenEmpty: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if viewModel.isPreparingVoiceRecording || viewModel.isRecordingVoice || viewModel.isTranscribingVoice {
+                VoiceStatusPanel(viewModel: viewModel)
+            }
+
+            if viewModel.isRunning {
+                BusyPanel(logStore: viewModel.logStore)
+            }
+
+            if let error = viewModel.errorMessage {
+                ErrorBanner(message: error)
+            }
+
+            if let question = viewModel.clarificationQuestion {
+                ClarificationPanel(viewModel: viewModel, question: question)
+            }
+
+            RunDetailsView(
+                viewModel: viewModel,
+                logStore: viewModel.logStore,
+                showsStartupWhenEmpty: showsStartupWhenEmpty
+            )
+        }
+    }
+}
+
 private struct RunDetailsView: View {
     @ObservedObject var viewModel: AgentViewModel
     @ObservedObject var logStore: AgentLogStore
+    let showsStartupWhenEmpty: Bool
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -726,10 +709,16 @@ private struct RunDetailsView: View {
                         ApprovalPanel(request: approvalRequest)
                     }
 
-                    if logStore.events.isEmpty && viewModel.plan == nil && viewModel.previews.isEmpty && viewModel.finalSummary.isEmpty {
+                    if showsStartupWhenEmpty
+                        && logStore.events.isEmpty
+                        && viewModel.plan == nil
+                        && viewModel.previews.isEmpty
+                        && viewModel.finalSummary.isEmpty {
                         StartupPanel()
                     } else {
-                        LogPanel(logStore: logStore)
+                        if !logStore.events.isEmpty {
+                            LogPanel(logStore: logStore)
+                        }
                     }
 
                     if shouldShowUsageSummary {
@@ -790,17 +779,19 @@ private struct PlanPanel: View {
                     .lineSpacing(2)
 
                 ForEach(plan.steps) { step in
+                    let status = stepStatuses[step.id] ?? .pending
                     HStack(alignment: .top, spacing: 8) {
-                        StepStatusIcon(status: stepStatuses[step.id] ?? .pending)
-                        Text(step.operation.rawValue)
-                            .font(SonnyType.code)
-                            .foregroundStyle(SonnyTheme.muted)
-                            .frame(width: 140, alignment: .leading)
-                        Text(step.description)
-                            .font(SonnyType.caption)
-                            .foregroundStyle(SonnyTheme.text.opacity(0.9))
-                            .lineSpacing(1)
-                            .fixedSize(horizontal: false, vertical: true)
+                        StepStatusIcon(status: status)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(AgentActivityPresentation.planStepTitle(step))
+                                .font(SonnyType.caption)
+                                .foregroundStyle(SonnyTheme.text.opacity(0.9))
+                                .lineSpacing(1)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(AgentActivityPresentation.statusTitle(status))
+                                .font(SonnyType.micro)
+                                .foregroundStyle(SonnyTheme.muted)
+                        }
                     }
                 }
             }
@@ -816,7 +807,7 @@ private struct StepStatusIcon: View {
             .font(SonnyType.caption)
             .foregroundStyle(color)
             .frame(width: 16)
-            .help(status.rawValue)
+            .help(AgentActivityPresentation.statusTitle(status))
     }
 
     private var icon: String {
@@ -872,7 +863,10 @@ private struct PreviewPanel: View {
                         }
 
                         ForEach(preview.sideEffects, id: \.self) { sideEffect in
-                            Label(sideEffect, systemImage: "exclamationmark.triangle")
+                            Label(
+                                AgentActivityPresentation.previewSideEffect(sideEffect),
+                                systemImage: "exclamationmark.triangle"
+                            )
                                 .font(SonnyType.caption)
                                 .foregroundStyle(SonnyTheme.warning)
                                 .lineSpacing(1)
@@ -916,20 +910,27 @@ private struct LogPanel: View {
     @ObservedObject var logStore: AgentLogStore
 
     var body: some View {
-        Panel(title: "Log", systemImage: "waveform.path.ecg") {
-            VStack(alignment: .leading, spacing: 7) {
+        Panel(title: "Activity", systemImage: "waveform.path.ecg") {
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(logStore.events) { event in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(event.phase.rawValue)
-                            .font(SonnyType.code)
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: AgentActivityPresentation.eventIcon(event.phase))
+                            .font(SonnyType.icon(12))
                             .foregroundStyle(phaseColor(event.phase))
-                            .frame(width: 74, alignment: .leading)
-                        Text(event.message)
-                            .font(SonnyType.caption)
-                            .foregroundStyle(SonnyTheme.text.opacity(0.88))
-                            .lineSpacing(1)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(width: 16, alignment: .center)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(AgentActivityPresentation.eventTitle(event))
+                                .font(SonnyType.micro)
+                                .foregroundStyle(phaseColor(event.phase))
+                            Text(AgentActivityPresentation.eventMessage(event))
+                                .font(SonnyType.caption)
+                                .foregroundStyle(SonnyTheme.text.opacity(0.88))
+                                .lineSpacing(1)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
@@ -1275,7 +1276,7 @@ private struct PanelHeader: View {
     }
 }
 
-private enum SonnyType {
+enum SonnyType {
     static let brand = Font.custom("InstrumentSerif-Regular", size: 42)
     static let hero = Font.custom("InstrumentSerif-Regular", size: 28)
     static let panelTitle = Font.custom("InstrumentSerif-Regular", size: 23)
@@ -1295,7 +1296,7 @@ private enum SonnyType {
     }
 }
 
-private enum SonnyTheme {
+enum SonnyTheme {
     static let ink = Color(red: 0.118, green: 0.110, blue: 0.110)
     static let cream = Color(red: 1.000, green: 0.996, blue: 0.988)
     static let paper = Color(red: 0.922, green: 0.914, blue: 0.886)
@@ -1315,7 +1316,7 @@ private enum SonnyTheme {
     static let info = paper
 }
 
-private extension View {
+extension View {
     func glassPanel(cornerRadius: CGFloat) -> some View {
         background(
             RoundedRectangle(cornerRadius: cornerRadius)
@@ -1333,7 +1334,7 @@ private extension View {
     }
 }
 
-private struct SonnyButtonStyle: ButtonStyle {
+struct SonnyButtonStyle: ButtonStyle {
     let tone: Tone
     var width: CGFloat? = nil
 
