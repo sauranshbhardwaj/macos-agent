@@ -32,7 +32,7 @@ Dependency-ordered. Do not start a branch before the ones above it are merged, u
 | 4 | `feature/provider-media-playback` | §4A.4 | Complete (pending review) |
 | 5 | `feature/instant-utilities-shortcuts` | §4A.6, §4A.7 | Complete (pending review) |
 | 6 | `feature/followup-usage-transparency` | §4A.8, §4A.9 | Complete (pending review) |
-| 7 | `feature/local-storage-privacy-foundation` | §15.4 | Not started |
+| 7 | `feature/local-storage-privacy-foundation` | §15.4 | Complete (pending review) |
 | 8 | `feature/product-shell-shared-state` | §4A.1 (shell only), §6.2, §6.3, §17.3 | Not started |
 | 9 | `feature/hosted-agent-runtime-backend` | §6.1, §8, §9, §16, §21.2, §21.3, §6.19 | Not started |
 | 10 | `feature/billing-command-center-memory` | §6.14, §16.3, §16.4, §6.3A (full), §6.10 | Not started |
@@ -93,6 +93,85 @@ Primary target: §<sections>
 Just completed: feature/<prev-name> — <one-line summary>
 Must preserve: <the specific existing flows this branch must not break, pulled from "Behavior preserved" above>
 Known pitfalls to avoid repeating: <from "Architectural decisions / pitfalls discovered" above, or "none">
+
+Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
+
+### Branch: feature/local-storage-privacy-foundation
+Status: complete
+Date: 2026-07-09
+Implementing agent: Codex
+Reviewing agent: Claude
+
+Spec sections covered: §15.4 complete for encrypted local storage, Keychain-backed local encryption key management, no-plain-file credential invariant preservation, and local data deletion for the persisted stores that exist today. Exclusions, cached entitlement state, persistent recent task history, backend secrets management, and enterprise security remain out of scope because those features are not real local stores yet or belong to later roadmap branches.
+Files changed:
+- `Sources/MacAgent/AgentViewModel.swift`
+- `Sources/MacAgent/ContentView.swift`
+- `Sources/MacAgentCore/AutomationStores.swift`
+- `Sources/MacAgentCore/ClipboardHistoryService.swift`
+- `Sources/MacAgentCore/KeychainSecretStore.swift`
+- `Sources/MacAgentCore/LocalDataDeletionService.swift`
+- `Sources/MacAgentCore/LocalStorageEncryption.swift`
+- `Sources/MacAgentCore/RecentArtifactStore.swift`
+- `Sources/MacAgentCore/ShortcutsBridgeService.swift`
+- `Sources/MacAgentCore/SnippetStore.swift`
+- `Tests/MacAgentCoreTests/LocalStorageSecurityTests.swift`
+- `docs/sonny-v1-implementation-changelog.md`
+
+Tests: `env CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache" swift test --disable-sandbox -Xswiftc -F -Xswiftc /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/Frameworks -Xlinker -rpath -Xlinker /Library/Developer/CommandLineTools/Library/Developer/usr/lib` -> pass, 178 tests in 21 suites.
+
+Behavior added:
+- Added `KeychainSecretStore`, a reusable generic-password Keychain helper for data read/save/delete by service/account.
+- Added `LocalStorageEncryptionKeyManager`, which loads a 32-byte local data encryption key from Keychain or generates and stores one on first app launch.
+- Added `LocalStorageEncryption`, using CryptoKit `AES.GCM` authenticated encryption with the `SONNYENC1\n` file header plus combined nonce/ciphertext/tag bytes.
+- Encrypted all seven existing local JSON stores at rest: routines, workspaces, clipboard history, clipboard history settings, snippets, recent artifacts, and Shortcut run history.
+- Added transparent legacy plaintext JSON migration: files without the encrypted header decode as old JSON once, then rewrite encrypted after successful load.
+- Added raw-byte tests proving known plaintext markers written through public store APIs are absent from the on-disk bytes for all seven stores.
+- Added `LocalDataDeletionService`, deleting only the seven Sonny local store files and tolerating already-missing files.
+- Added a direct `AgentViewModel.deleteLocalData()` settings/privacy action that stops clipboard monitoring, deletes local store files, clears relevant in-memory UI state, and refreshes saved routine/workspace and clipboard-setting surfaces.
+- Added a destructive native confirmation dialog in the existing Status panel for local data deletion, explicitly naming the deleted local data and noting generated files/API keys are not deleted.
+
+Behavior preserved (required, no blanket claims):
+- Routine save/load/run behavior remains transparent to existing callers; quick routine dispatch and nested routine risk folding still use `RoutineStore` through the same public API.
+- Workspace save/load/open behavior remains transparent to existing callers; quick workspace dispatch and app-before-URL launch behavior still use `WorkspaceStore` through the same public API.
+- Clipboard history still skips ConcealedType/TransientType pasteboard items before reading content, still applies item/age/text caps, and still respects the existing notice/settings toggle.
+- Snippet save and exact-trigger expansion still use the same public `SnippetStore` calls, with snippet saving tier 2 and expansion tier 0.
+- Recent artifact recording still happens only after successful non-dry-run execution through `AgentRunner`, and recent artifact opening still routes through `open_generated_artifact`.
+- Shortcut run-history demotion still uses the same process-level Sonny-observed success/failure semantics; encryption does not reinterpret `shortcuts` exit status.
+- `OPENAI_API_KEY` remains environment-variable-only for planner, web synthesis, and transcription; no raw API credentials are written to plain files, and no new OAuth/provider token persistence was added.
+- Prior-task context remains 10-minute, last-task-only, and in-memory only; this branch did not add persistent chat memory or recent-task-history storage.
+
+Architectural decisions / pitfalls discovered (required, write "none" if true):
+- Bulk local JSON data is encrypted in files with AES-GCM; Keychain stores only the symmetric key, not the JSON store contents.
+- Store APIs stayed source-compatible and DI-friendly by adding defaulted `encryption:` constructor parameters and changing only the private read/write serialization paths.
+- Legacy plaintext migration was implemented instead of clean-slate unreadability, because it was low-cost and avoids losing developer test data accumulated across branches #1-6.
+- Local data deletion intentionally does not delete the Keychain encryption key. This is data deletion, not a cryptographic reset/re-key flow; if a future branch needs "reset encryption identity," it should be a separate explicit action with its own warning.
+- Local data deletion is intentionally not an `AgentOperation`, capability adapter, planner tool, or `AgentRunner` risk-gated action. It is a direct settings/privacy action on `AgentViewModel` with a native destructive confirmation dialog.
+- `LocalStorageEncryption.shared` uses a test-process heuristic (`processName`/bundle path containing test markers or `XCTestConfigurationFilePath`) to supply a deterministic ephemeral test key under SwiftPM/XCTest. Production app/runtime defaults still use `LocalStorageEncryptionKeyManager` and Keychain. Future tests should prefer injected key managers rather than hitting the user's real login Keychain.
+- The encrypted file format is versioned with the `SONNYENC1\n` prefix so a future file-format/key-rotation migration can distinguish encrypted-v1 bytes from legacy plaintext JSON.
+- Persistent recent task history was not introduced. Branch #6's `PriorTaskContextStore` is deliberately memory-only, and creating a new persistent feature just to encrypt it would have been scope creep.
+
+Known limitations / deferred scope:
+- Exclusions and cached entitlement state are not implemented yet, so there is no local data to encrypt or delete for them on this branch.
+- Persistent recent task history still does not exist; future memory/history branches should add their own encrypted store intentionally if they introduce one.
+- Local data deletion removes Sonny's seven local store files only; it does not delete generated user artifacts in Desktop/Documents, the Keychain encryption key, `OPENAI_API_KEY` environment variables, or any future hosted account data.
+- Backend security (§15.5), hosted secrets manager work, hosted auth/entitlements, billing, enterprise security (§15.6), SSO/SCIM, and admin policies remain later-branch work.
+- No real OAuth tokens for Spotify/Apple Music and no entitlement credentials were persisted; this branch only creates the reusable Keychain pattern those future credentials should use.
+Open questions for the next chat (required, write "none" if true): none.
+
+Next branch: `feature/product-shell-shared-state` (§4A.1 shell only, §6.2, §6.3, §17.3), adding the shared-state product shell foundation so the menu-bar cockpit and future Command Center read/write one state layer instead of separate UI stacks.
+
+--- Kickoff prompt for next chat (paste verbatim as the first message) ---
+Repo: /Users/sauranshbhardwaj/Desktop/macos-agent
+Spec: docs/sonny-major-release-spec.md
+Changelog: docs/sonny-v1-implementation-changelog.md — read the latest entry before anything else. Do not trust memory or assumptions over it; verify against current git state.
+
+Branch: feature/product-shell-shared-state
+Implementing agent: Codex  Reviewing agent: Claude
+Primary target: §4A.1 shell only, §6.2, §6.3, §17.3
+
+Just completed: feature/local-storage-privacy-foundation — Sonny now encrypts the seven existing local JSON stores at rest with AES-GCM, stores the symmetric local encryption key in Keychain, migrates legacy plaintext JSON on successful load, and exposes direct confirmed local data deletion in the existing Status panel.
+Must preserve: encryption remains transparent to RoutineStore/WorkspaceStore/ClipboardHistoryStore/ClipboardHistorySettingsStore/SnippetStore/RecentArtifactStore/ShortcutRunHistoryStore callers; legacy plaintext JSON migration must still rewrite encrypted after successful load; local data deletion remains a direct settings/privacy action, not a planner/capability/AgentRunner-routed action; deletion removes local store files but not generated artifacts or the Keychain encryption key; `OPENAI_API_KEY` remains env-var-only; prior-task context remains short-lived, last-task-only, and non-persistent; instant commands still bypass only planner calls and continue through normal runner/risk behavior.
+Known pitfalls to avoid repeating: Keychain stores only secrets/keys, not bulk JSON; do not add cryptographic key reset unless explicitly scoped as a separate destructive action; use injected key managers or the existing test-process fallback for storage tests rather than touching the user's real login Keychain; do not introduce a persistent recent-task-history store on branch #8 unless the product-shell scope explicitly requires it; branch #8 is the shared-state shell/Command Center foundation only, not billing/account/subscription/entitlement implementation.
 
 Start in plan mode. Confirm git status is clean on main, confirm the changelog's account of the prior branch still matches the current code, then produce an implementation plan before editing anything. Do not commit, push, merge, or open a PR without explicit approval.
 
