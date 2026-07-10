@@ -37,28 +37,78 @@ final class AgentViewModel: ObservableObject {
     private var preparedRun: PreparedAgentRun?
     private var runner: AgentRunner?
     private var currentTask: Task<Void, Never>?
-    private let audioRecorder = AudioCommandRecorder()
-    private let permissionReadinessService = PermissionReadinessService()
-    private let routineStore = RoutineStore()
-    private let workspaceStore = WorkspaceStore()
-    private let snippetStore = SnippetStore()
-    private let recentArtifactStore = RecentArtifactStore()
-    private let shortcutCatalog: any ShortcutCatalogProviding = ProcessShortcutCatalog()
-    private let shortcutRunHistoryStore = ShortcutRunHistoryStore()
-    private let clipboardHistorySettingsStore = ClipboardHistorySettingsStore()
-    private let clipboardHistoryMonitor = ClipboardHistoryMonitor()
-    private let localDataDeletionService = LocalDataDeletionService()
-    private let priorTaskContextStore = PriorTaskContextStore()
-    private let taskUsageRecorder = TaskUsageRecorder()
+    private let audioRecorder: AudioCommandRecorder
+    private let permissionReadinessService: PermissionReadinessService
+    private let routineStore: RoutineStore
+    private let workspaceStore: WorkspaceStore
+    private let snippetStore: SnippetStore
+    private let recentArtifactStore: RecentArtifactStore
+    private let shortcutCatalog: any ShortcutCatalogProviding
+    private let shortcutRunHistoryStore: ShortcutRunHistoryStore
+    private let clipboardHistorySettingsStore: ClipboardHistorySettingsStore
+    private let clipboardHistoryMonitor: ClipboardHistoryMonitor
+    private let localDataDeletionService: LocalDataDeletionService
+    private let priorTaskContextStore: PriorTaskContextStore
+    private let taskUsageRecorder: TaskUsageRecorder
     private var clipboardHistoryTimer: Timer?
     private var clarificationAutoExecute = false
     private var isPushToTalkHotKeyDown = false
     private var pendingCommandForPriorTaskContext: String?
     private var preserveUsageForNextStart = false
+    private var localStorageLoadFailures: [LocalStorageLoadFailureSource: String] = [:]
+    private var localStorageLoadErrorMessage: String?
+
+    private enum LocalStorageLoadFailureSource: CaseIterable, Hashable {
+        case savedRoutines
+        case savedWorkspaces
+        case clipboardHistorySettings
+
+        var label: String {
+            switch self {
+            case .savedRoutines:
+                return "saved routines"
+            case .savedWorkspaces:
+                return "saved workspaces"
+            case .clipboardHistorySettings:
+                return "clipboard history settings"
+            }
+        }
+    }
 
     private enum VoiceRecordingTrigger {
         case button
         case hotKey
+    }
+
+    init(
+        audioRecorder: AudioCommandRecorder = AudioCommandRecorder(),
+        permissionReadinessService: PermissionReadinessService = PermissionReadinessService(),
+        routineStore: RoutineStore = RoutineStore(),
+        workspaceStore: WorkspaceStore = WorkspaceStore(),
+        snippetStore: SnippetStore = SnippetStore(),
+        recentArtifactStore: RecentArtifactStore = RecentArtifactStore(),
+        shortcutCatalog: any ShortcutCatalogProviding = ProcessShortcutCatalog(),
+        shortcutRunHistoryStore: ShortcutRunHistoryStore = ShortcutRunHistoryStore(),
+        clipboardHistorySettingsStore: ClipboardHistorySettingsStore = ClipboardHistorySettingsStore(),
+        clipboardHistoryMonitor: ClipboardHistoryMonitor? = nil,
+        localDataDeletionService: LocalDataDeletionService = LocalDataDeletionService(),
+        priorTaskContextStore: PriorTaskContextStore = PriorTaskContextStore(),
+        taskUsageRecorder: TaskUsageRecorder = TaskUsageRecorder()
+    ) {
+        self.audioRecorder = audioRecorder
+        self.permissionReadinessService = permissionReadinessService
+        self.routineStore = routineStore
+        self.workspaceStore = workspaceStore
+        self.snippetStore = snippetStore
+        self.recentArtifactStore = recentArtifactStore
+        self.shortcutCatalog = shortcutCatalog
+        self.shortcutRunHistoryStore = shortcutRunHistoryStore
+        self.clipboardHistorySettingsStore = clipboardHistorySettingsStore
+        self.clipboardHistoryMonitor = clipboardHistoryMonitor
+            ?? ClipboardHistoryMonitor(settingsStore: clipboardHistorySettingsStore)
+        self.localDataDeletionService = localDataDeletionService
+        self.priorTaskContextStore = priorTaskContextStore
+        self.taskUsageRecorder = taskUsageRecorder
     }
 
     var hasAPIKey: Bool {
@@ -437,14 +487,34 @@ final class AgentViewModel: ObservableObject {
     }
 
     func refreshSavedItems() {
-        savedRoutines = ((try? routineStore.loadAll().values.map { $0 }) ?? [])
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        savedWorkspaces = ((try? workspaceStore.loadAll().values.map { $0 }) ?? [])
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        do {
+            savedRoutines = try routineStore.loadAll().values
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            clearLocalStorageLoadFailure(.savedRoutines)
+        } catch {
+            recordLocalStorageLoadFailure(.savedRoutines, error: error)
+        }
+
+        do {
+            savedWorkspaces = try workspaceStore.loadAll().values
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            clearLocalStorageLoadFailure(.savedWorkspaces)
+        } catch {
+            recordLocalStorageLoadFailure(.savedWorkspaces, error: error)
+        }
     }
 
     func refreshClipboardHistoryNotice() {
-        let settings = (try? clipboardHistorySettingsStore.load()) ?? ClipboardHistorySettings()
+        let settings: ClipboardHistorySettings
+        do {
+            settings = try clipboardHistorySettingsStore.load()
+            clearLocalStorageLoadFailure(.clipboardHistorySettings)
+        } catch {
+            stopClipboardHistoryMonitoring()
+            recordLocalStorageLoadFailure(.clipboardHistorySettings, error: error)
+            return
+        }
+
         clipboardHistoryEnabled = settings.isEnabled
         showClipboardHistoryNotice = !settings.noticeDismissed
 
@@ -602,6 +672,35 @@ final class AgentViewModel: ObservableObject {
     private func stopClipboardHistoryMonitoring() {
         clipboardHistoryTimer?.invalidate()
         clipboardHistoryTimer = nil
+    }
+
+    private func recordLocalStorageLoadFailure(_ source: LocalStorageLoadFailureSource, error: Error) {
+        localStorageLoadFailures[source] = "\(source.label): \(error.localizedDescription)"
+        publishLocalStorageLoadError()
+    }
+
+    private func clearLocalStorageLoadFailure(_ source: LocalStorageLoadFailureSource) {
+        guard localStorageLoadFailures.removeValue(forKey: source) != nil else {
+            return
+        }
+        publishLocalStorageLoadError()
+    }
+
+    private func publishLocalStorageLoadError() {
+        guard !localStorageLoadFailures.isEmpty else {
+            if errorMessage == localStorageLoadErrorMessage {
+                errorMessage = nil
+            }
+            localStorageLoadErrorMessage = nil
+            return
+        }
+
+        let details = LocalStorageLoadFailureSource.allCases
+            .compactMap { localStorageLoadFailures[$0] }
+            .joined(separator: "; ")
+        let message = "Sonny could not load encrypted local data. A local data file exists but could not be decrypted or decoded. \(details)"
+        localStorageLoadErrorMessage = message
+        errorMessage = message
     }
 
     private func makeInstantCommandResolver() -> InstantCommandResolver {
