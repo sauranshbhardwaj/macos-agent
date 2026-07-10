@@ -179,6 +179,28 @@ struct LocalStorageSecurityTests {
     }
 
     @Test
+    func encryptionCachesKeychainKeyAfterFirstSuccessfulRetrieval() throws {
+        let secrets = CountingKeychainSecretStore(existingData: Data(repeating: 0x7A, count: 32))
+        let manager = LocalStorageEncryptionKeyManager(
+            secretStore: secrets,
+            service: "test.local-storage",
+            account: "key"
+        )
+        let encryption = LocalStorageEncryption(keyManager: manager)
+
+        let first = try encryption.encode(["first": "value"])
+        #expect(try encryption.decode([String: String].self, from: first).value["first"] == "value")
+
+        let second = try encryption.encode(["second": "value"])
+        #expect(try encryption.decode([String: String].self, from: second).value["second"] == "value")
+
+        _ = try encryption.encode(["third": "value"])
+
+        #expect(secrets.dataCallCount == 1)
+        #expect(secrets.saveCallCount == 0)
+    }
+
+    @Test
     func localDataDeletionServiceRemovesAllStoreFilesAndToleratesMissingFiles() throws {
         let root = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -373,6 +395,53 @@ private final class FakeKeychainSecretStore: KeychainSecretStoring, @unchecked S
     }
 
     func delete(service: String, account: String) throws {
+        values.removeValue(forKey: key(service: service, account: account))
+    }
+
+    private func key(service: String, account: String) -> String {
+        "\(service)\u{0}\(account)"
+    }
+}
+
+private final class CountingKeychainSecretStore: KeychainSecretStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Data]
+    private var dataCalls = 0
+    private var saveCalls = 0
+
+    init(existingData: Data) {
+        values = ["test.local-storage\u{0}key": existingData]
+    }
+
+    var dataCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return dataCalls
+    }
+
+    var saveCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return saveCalls
+    }
+
+    func data(service: String, account: String) throws -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        dataCalls += 1
+        return values[key(service: service, account: account)]
+    }
+
+    func save(_ data: Data, service: String, account: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        saveCalls += 1
+        values[key(service: service, account: account)] = data
+    }
+
+    func delete(service: String, account: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
         values.removeValue(forKey: key(service: service, account: account))
     }
 

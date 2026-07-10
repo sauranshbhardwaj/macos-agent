@@ -85,6 +85,7 @@ public struct LocalStorageEncryption: @unchecked Sendable {
     public static let fileHeader = Data("SONNYENC1\n".utf8)
 
     private let keyManager: any LocalStorageKeyManaging
+    private let keyCache = LocalStorageEncryptionKeyCache()
 
     public init(keyManager: any LocalStorageKeyManaging = LocalStorageEncryptionKeyManager()) {
         self.keyManager = keyManager
@@ -117,9 +118,12 @@ public struct LocalStorageEncryption: @unchecked Sendable {
     }
 
     private func key() throws -> SymmetricKey {
-        let data = try keyManager.keyData()
-        guard data.count == 32 else {
-            throw LocalStorageEncryptionError.invalidKeyLength(data.count)
+        let data = try keyCache.keyData {
+            let keyData = try keyManager.keyData()
+            guard keyData.count == 32 else {
+                throw LocalStorageEncryptionError.invalidKeyLength(keyData.count)
+            }
+            return keyData
         }
         return SymmetricKey(data: data)
     }
@@ -139,6 +143,24 @@ public struct LocalStorageEncryption: @unchecked Sendable {
             || bundlePath.contains(".xctest")
             || bundlePath.contains("packagetests")
             || processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
+private final class LocalStorageEncryptionKeyCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cachedKeyData: Data?
+
+    func keyData(load: () throws -> Data) throws -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let cachedKeyData {
+            return cachedKeyData
+        }
+
+        let keyData = try load()
+        cachedKeyData = keyData
+        return keyData
     }
 }
 
