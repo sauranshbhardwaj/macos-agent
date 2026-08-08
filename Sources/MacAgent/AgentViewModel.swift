@@ -682,10 +682,14 @@ final class AgentViewModel: ObservableObject {
                         let hint = Self.visionFallbackAppHint(for: supportedSteps)
                         if supportedSteps.isEmpty {
                             logStore.append(.plan, "No supported steps — handing the whole goal to the vision fallback")
-                            await runVisionFallback(PendingVisionFallback(goal: submittedCommand, hint: hint))
+                            await runVisionFallback(PendingVisionFallback(goal: submittedCommand, hint: hint, completedNote: nil))
                             return
                         }
-                        pendingVisionFallback = PendingVisionFallback(goal: submittedCommand, hint: hint)
+                        pendingVisionFallback = PendingVisionFallback(
+                            goal: submittedCommand,
+                            hint: hint,
+                            completedNote: supportedSteps.map(\.description).joined(separator: "; ")
+                        )
                         prepared = try runner.prepare(
                             plan: AgentPlan(
                                 summary: plan.summary,
@@ -856,6 +860,7 @@ final class AgentViewModel: ObservableObject {
     private struct PendingVisionFallback {
         let goal: String
         let hint: VisionFallbackAppHint
+        let completedNote: String?
     }
 
     private var pendingVisionFallback: PendingVisionFallback?
@@ -892,7 +897,13 @@ final class AgentViewModel: ObservableObject {
             finalSummary = "Canceled."
             return
         }
-        await runVisionLoop(VisionActionRequest(appName: appName, goal: fallback.goal))
+        await runVisionLoop(VisionActionRequest(
+            appName: appName,
+            goal: fallback.goal,
+            contextNote: fallback.completedNote.map {
+                "before this loop, Sonny's own tools already completed: \($0). Continue from the current screen state — do not redo those parts."
+            }
+        ))
     }
 
     // SONNY-69 experiment (throwaway): drives the vision click loop for the env-gated debug

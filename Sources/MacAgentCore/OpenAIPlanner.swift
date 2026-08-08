@@ -171,6 +171,18 @@ public final class OpenAIPlanner: Planning {
     - You may produce multi-step chained plans when the user asks for multiple supported actions. Keep steps in execution order.
     - For any unsupported request, return one unsupported step and explain why.
     - Never include shell commands, AppleScript, or code.
+    """ + visionExperimentPromptSuffix()
+    }
+
+    // SONNY-69 experiment (env-gated, throwaway): without this the planner rejects a mixed
+    // request wholesale ("open snapchat.com and text bhavya" -> one unsupported step), so the
+    // supported open_url never runs and the vision fallback starts on whatever app happens to
+    // be frontmost instead of a loaded page. Gate unset -> prompt byte-identical to before.
+    nonisolated private static func visionExperimentPromptSuffix() -> String {
+        guard VisionActionExperiment.isEnabled else { return "" }
+        return """
+
+    - EXPERIMENT MODE: a vision-guided fallback agent can operate any app's on-screen UI after your steps run. When a request mixes actions your tools support with actions they do not, do NOT reject the whole request: produce the supported steps (for example open_url for a website the user names) in execution order, followed by exactly one unsupported step whose description names only the part that remains undone. Return a lone unsupported step only when no part of the request maps to any registered tool.
     """
     }
 }

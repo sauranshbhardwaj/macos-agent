@@ -15,10 +15,14 @@ import UniformTypeIdentifiers
 public struct VisionActionRequest: Equatable, Sendable {
     public let appName: String
     public let goal: String
+    // Seeds the model's action history with what the coordinator's tools already did, so the
+    // vision phase continues the goal instead of redoing the parts a plan step completed.
+    public let contextNote: String?
 
-    public init(appName: String, goal: String) {
+    public init(appName: String, goal: String, contextNote: String? = nil) {
         self.appName = appName
         self.goal = goal
+        self.contextNote = contextNote
     }
 }
 
@@ -145,6 +149,9 @@ public enum VisionActionLoop {
         emit("start host=\(client.host.rawValue) model=\(client.model) app=\"\(request.appName)\" goal=\"\(request.goal)\"")
 
         var history: [String] = []
+        if let contextNote = request.contextNote {
+            history.append(contextNote)
+        }
         var actions: [ActionRecord] = []
         var iterationsRun = 0
 
@@ -179,12 +186,16 @@ public enum VisionActionLoop {
                 return RunSummary(outcome: .done(decision.rationale), actions: actions, iterations: iteration, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
             case .stuck:
                 return RunSummary(outcome: .stuck(decision.rationale), actions: actions, iterations: iteration, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
+            case .wait:
+                emit("iteration \(iteration): WAIT — \(decision.rationale)")
+                history.append("iteration \(iteration): waited for the screen to settle — \(decision.rationale)")
+                try await Task.sleep(nanoseconds: 2_000_000_000)
             case .type:
                 guard let text = decision.text, !text.isEmpty else {
                     throw VisionActionLoopError.unparseableModelReply(reply)
                 }
                 // Same mandate as clicks: log BEFORE the keystrokes are issued.
-                emit("iteration \(iteration): TYPE \"\(text)\" target=\"\(decision.target)\" rationale=\"\(decision.rationale)\"")
+                emit("iteration \(iteration): TYPE \"\(text.replacingOccurrences(of: "\n", with: "\\n"))\" target=\"\(decision.target)\" rationale=\"\(decision.rationale)\"")
                 try await synthesizeTyping(text)
                 actions.append(ActionRecord(
                     kind: .type,
@@ -196,8 +207,8 @@ public enum VisionActionLoop {
                     rationale: decision.rationale,
                     visionLatencySeconds: latency
                 ))
-                history.append("iteration \(iteration): typed \"\(text)\" into \"\(decision.target)\" — \(decision.rationale)")
-                try await Task.sleep(nanoseconds: 800_000_000)
+                history.append("iteration \(iteration): typed \"\(text.replacingOccurrences(of: "\n", with: "\\n"))\" into \"\(decision.target)\" — \(decision.rationale)")
+                try await Task.sleep(nanoseconds: 1_500_000_000)
             case .click:
                 guard let x = decision.x, let y = decision.y else {
                     throw VisionActionLoopError.unparseableModelReply(reply)
@@ -455,26 +466,32 @@ public enum VisionActionLoop {
         post(.leftMouseUp)
     }
 
-    // Unicode-string keyboard events (virtual key 0 + keyboardSetUnicodeString) type arbitrary
-    // text into the focused control without layout/keycode mapping; ≤20 UTF-16 units per event
-    // is the API's documented chunk limit.
+    // One character per event pair — multi-character keyboardSetUnicodeString chunks are legal
+    // but some targets (Chromium's omnibox among them) only honor the first character. Newlines
+    // are the other observed live failure: a unicode "\n" is not a Return keypress and neither
+    // a shell nor an address bar executes on it, so they are synthesized as real Return-keycode
+    // (36) events instead.
     private static func synthesizeTyping(_ text: String) async throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             throw VisionActionLoopError.captureFailed("could not create CGEventSource")
         }
-        let units = Array(text.utf16)
-        var index = 0
-        while index < units.count {
-            let chunk = Array(units[index..<min(index + 20, units.count)])
-            for keyDown in [true, false] {
-                guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown) else { continue }
-                chunk.withUnsafeBufferPointer { buffer in
-                    event.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: buffer.baseAddress)
+        for character in text {
+            if character == "\n" || character == "\r" {
+                for keyDown in [true, false] {
+                    CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: keyDown)?
+                        .post(tap: .cghidEventTap)
                 }
-                event.post(tap: .cghidEventTap)
+            } else {
+                let units = Array(String(character).utf16)
+                for keyDown in [true, false] {
+                    guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown) else { continue }
+                    units.withUnsafeBufferPointer { buffer in
+                        event.keyboardSetUnicodeString(stringLength: units.count, unicodeString: buffer.baseAddress)
+                    }
+                    event.post(tap: .cghidEventTap)
+                }
             }
-            index += 20
-            try await Task.sleep(nanoseconds: 40_000_000)
+            try await Task.sleep(nanoseconds: 15_000_000)
         }
     }
 
@@ -499,11 +516,13 @@ public enum VisionActionLoop {
         Decide the single next action toward the goal. Reply with ONLY a JSON object, no markdown fences, no extra text. One of:
         {"action":"click","x":<int>,"y":<int>,"target":"<visible label of the control>","rationale":"<one short sentence>"}
         {"action":"type","text":"<the literal text to type>","target":"<the focused text field>","rationale":"<one short sentence>"}
+        {"action":"wait","x":null,"y":null,"target":"","rationale":"<why>"}
         {"action":"done","x":null,"y":null,"target":"","rationale":"<why>"}
         {"action":"stuck","x":null,"y":null,"target":"","rationale":"<why>"}
         Coordinates must be pixels inside this screenshot; click the CENTER of the target control.
-        "type" sends real keystrokes to whatever control currently has keyboard focus — click the text field first in an earlier action if it is not already focused, and only type text the goal itself calls for.
-        Use "done" when the goal is already visibly complete in this screenshot; use "stuck" if no visible click or typing can advance the goal.
+        "type" sends real keystrokes to whatever control currently has keyboard focus — click the text field first in an earlier action if it is not already focused, and only type text the goal itself calls for. To submit what you typed (a chat message, an address bar URL), end the text with \\n — it is delivered as a real Return keypress.
+        Use "wait" when the page or app is visibly still loading and the right move is to let it finish.
+        Use "done" when the goal is already visibly complete in this screenshot; use "stuck" only after a click, typing, and waiting have all failed to advance the goal.
         """
     }
 }
@@ -637,6 +656,7 @@ struct VisionDecision {
     enum Kind: String {
         case click
         case type
+        case wait
         case done
         case stuck
     }
