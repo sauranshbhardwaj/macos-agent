@@ -628,6 +628,16 @@ final class AgentViewModel: ObservableObject {
         let priorContextForPlanner = priorTaskContextStore.currentContext()
         priorTaskContext = priorContextForPlanner
 
+        // SONNY-69 experiment (env-gated, throwaway): "vision: <App> | <goal>" routes to the
+        // vision click loop instead of planning. Checked before the instant resolver so the
+        // experiment prefix can never collide with real command matching. Deliberately outside
+        // the risk/approval engine and task-history recording — see the ticket's safety note.
+        if VisionActionExperiment.isEnabled,
+           let parsed = VisionActionExperiment.parseCommand(submittedCommand) {
+            await runVisionExperiment(parsed)
+            return
+        }
+
         do {
             let executor = makeExecutor()
             let runner: AgentRunner
@@ -645,7 +655,14 @@ final class AgentViewModel: ObservableObject {
                     prepared = try runner.prepare(plan: localPlan, source: .instantResolver)
                 }
             } else {
-                let planner = try OpenAIPlanner(usageRecorder: taskUsageRecorder)
+                // SONNY-69 experiment: SONNY_PLANNER=cerebras swaps in the Cerebras-hosted
+                // gpt-oss planner; unset (or any other value) keeps the OpenAI path untouched.
+                let planner: any Planning
+                if ProcessInfo.processInfo.environment["SONNY_PLANNER"]?.lowercased() == "cerebras" {
+                    planner = try CerebrasPlanner(usageRecorder: taskUsageRecorder)
+                } else {
+                    planner = try OpenAIPlanner(usageRecorder: taskUsageRecorder)
+                }
                 runner = AgentRunner(
                     planner: planner,
                     executor: executor,
@@ -795,6 +812,26 @@ final class AgentViewModel: ObservableObject {
                         startedAt: taskHistoryStartedAt
                     )
                 }
+            }
+        }
+    }
+
+    // SONNY-69 experiment (throwaway): drives the vision click loop for the env-gated debug
+    // command. Errors surface through the same transient `errorMessage` channel as planner
+    // failures; the loop itself prints every capture and click to the console.
+    private func runVisionExperiment(_ parsed: VisionActionExperiment.ParseOutcome) async {
+        switch parsed {
+        case .malformed(let hint):
+            setError(hint)
+        case .request(let request):
+            logStore.append(.plan, "Vision experiment: \"\(request.goal)\" in \(request.appName)")
+            do {
+                let summary = try await VisionActionLoop.run(request)
+                finalSummary = summary.userSummary
+                logStore.append(.summarize, summary.userSummary)
+            } catch {
+                setError(error.localizedDescription)
+                logStore.append(.summarize, "Vision experiment stopped: \(error.localizedDescription)")
             }
         }
     }
