@@ -154,6 +154,12 @@ public enum VisionActionLoop {
         }
         var actions: [ActionRecord] = []
         var iterationsRun = 0
+        // Feedback state, live 2026-08-08: Gemma's raw pointing runs ~1 list-row low and, with
+        // byte-identical re-captures, the history kept implying the click worked — so the model
+        // repeated the same miss six times. The marker + pixel-identical callout give it ground
+        // truth to correct against.
+        var lastClickImagePoint: CGPoint?
+        var lastUnmarkedPNG: Data?
 
         for iteration in 1...maxIterations {
             iterationsRun = iteration
@@ -164,7 +170,20 @@ public enum VisionActionLoop {
             try await Task.sleep(nanoseconds: 800_000_000)
 
             let capture = try await captureFrontWindow(ofProcess: pid, appName: request.appName)
-            let png = try pngData(from: capture.image)
+            let unmarkedPNG = try pngData(from: capture.image)
+
+            // Compare UNMARKED bytes across iterations: the deterministic PNG encode makes
+            // byte-equality a reliable "the click changed nothing" signal.
+            if let previous = lastUnmarkedPNG, previous == unmarkedPNG, let missed = lastClickImagePoint {
+                history.append("IMPORTANT: your last click at image (\(Int(missed.x)), \(Int(missed.y))) produced NO visible change — the new screenshot is pixel-identical. The red circle-and-crosshair marker shows exactly where that click landed; it missed the control or that spot is not clickable. Compare the marker with the control you intended and correct your aim in the opposite direction of the miss, or choose a different approach.")
+            }
+            lastUnmarkedPNG = unmarkedPNG
+
+            var png = unmarkedPNG
+            if let lastClickImagePoint {
+                let marked = imageByMarkingPoint(capture.image, at: lastClickImagePoint)
+                png = (try? pngData(from: marked)) ?? unmarkedPNG
+            }
             guard png.count <= 9_000_000 else {
                 throw VisionActionLoopError.captureFailed("screenshot PNG is \(png.count) bytes, over the vision API payload limit")
             }
@@ -210,8 +229,22 @@ public enum VisionActionLoop {
                 history.append("iteration \(iteration): typed \"\(text.replacingOccurrences(of: "\n", with: "\\n"))\" into \"\(decision.target)\" — \(decision.rationale)")
                 try await Task.sleep(nanoseconds: 1_500_000_000)
             case .click:
-                guard let x = decision.x, let y = decision.y else {
+                guard let initialX = decision.x, let initialY = decision.y else {
                     throw VisionActionLoopError.unparseableModelReply(reply)
+                }
+                // Two-stage pointing: the model's first estimate on a full-window screenshot runs
+                // ~1 list-row off; a 2x zoom pass over a 320px crop around that estimate pins the
+                // control's center far more precisely. Refine failure just keeps the first estimate.
+                var x = initialX
+                var y = initialY
+                var refineLatency = 0.0
+                if let refined = await refineClick(client: client, image: capture.image, target: decision.target, initialX: initialX, initialY: initialY) {
+                    if refined.x != initialX || refined.y != initialY {
+                        emit("iteration \(iteration): zoom pass refined \"\(decision.target)\" from image(\(initialX),\(initialY)) to image(\(refined.x),\(refined.y)) in \(String(format: "%.2f", refined.latency))s")
+                    }
+                    x = refined.x
+                    y = refined.y
+                    refineLatency = refined.latency
                 }
                 // The screenshot is requested at 1x, but the scale is always recomputed from the
                 // actual image dimensions so a 2x capture still maps correctly to window points.
@@ -254,6 +287,7 @@ public enum VisionActionLoop {
                 emit("iteration \(iteration): CLICK image(\(x),\(y)) -> global(\(Int(globalPoint.x)),\(Int(globalPoint.y))) target=\"\(decision.target)\" rationale=\"\(decision.rationale)\"")
                 try await synthesizeClick(at: globalPoint)
 
+                lastClickImagePoint = CGPoint(x: x, y: y)
                 actions.append(ActionRecord(
                     kind: .click,
                     iteration: iteration,
@@ -262,7 +296,7 @@ public enum VisionActionLoop {
                     text: nil,
                     target: decision.target,
                     rationale: decision.rationale,
-                    visionLatencySeconds: latency
+                    visionLatencySeconds: latency + refineLatency
                 ))
                 history.append("iteration \(iteration): clicked \"\(decision.target)\" at image (\(x), \(y)) — \(decision.rationale)")
                 let clickActions = actions.filter { $0.kind == .click }
@@ -430,6 +464,99 @@ public enum VisionActionLoop {
         }
     }
 
+    // MARK: - Click-precision helpers
+
+    // Red circle + crosshair at the previous click's image coordinates, so the model can see
+    // exactly where its click landed and correct a miss. CGContext is bottom-left-origin, so
+    // the y is flipped once here.
+    private static func imageByMarkingPoint(_ image: CGImage, at point: CGPoint) -> CGImage {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: image.width,
+                  height: image.height,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            return image
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let flippedY = CGFloat(image.height) - point.y
+        context.setStrokeColor(CGColor(srgbRed: 1, green: 0, blue: 0, alpha: 1))
+        context.setLineWidth(3)
+        context.strokeEllipse(in: CGRect(x: point.x - 14, y: flippedY - 14, width: 28, height: 28))
+        context.move(to: CGPoint(x: point.x - 22, y: flippedY))
+        context.addLine(to: CGPoint(x: point.x + 22, y: flippedY))
+        context.move(to: CGPoint(x: point.x, y: flippedY - 22))
+        context.addLine(to: CGPoint(x: point.x, y: flippedY + 22))
+        context.strokePath()
+        return context.makeImage() ?? image
+    }
+
+    private static func upscaled2x(_ image: CGImage) -> CGImage? {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: image.width * 2,
+                  height: image.height * 2,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else {
+            return nil
+        }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width * 2, height: image.height * 2))
+        return context.makeImage()
+    }
+
+    private static func refineClick(
+        client: VisionModelClient,
+        image: CGImage,
+        target: String,
+        initialX: Int,
+        initialY: Int
+    ) async -> (x: Int, y: Int, latency: Double)? {
+        let side = 320
+        guard image.width >= side, image.height >= side else { return nil }
+        let x0 = max(0, min(image.width - side, initialX - side / 2))
+        let y0 = max(0, min(image.height - side, initialY - side / 2))
+        guard let crop = image.cropping(to: CGRect(x: x0, y: y0, width: side, height: side)),
+              let zoomed = upscaled2x(crop),
+              let png = try? pngData(from: zoomed) else {
+            return nil
+        }
+        let prompt = """
+        Zoomed 2x view of a \(side)x\(side)-pixel region of the same window screenshot, origin top-left. Find this control: "\(target)". Reply ONLY {"x":<int>,"y":<int>} — the exact CENTER of that control in THIS zoomed \(side * 2)x\(side * 2) image — or {"x":null,"y":null} if it is not visible here.
+        """
+        guard let response = try? await client.decide(prompt: prompt, pngData: png),
+              let refined = parseRefinement(response.reply),
+              (0...side * 2).contains(refined.x), (0...side * 2).contains(refined.y) else {
+            return nil
+        }
+        return (x0 + refined.x / 2, y0 + refined.y / 2, response.latencySeconds)
+    }
+
+    private static func parseRefinement(_ reply: String) -> (x: Int, y: Int)? {
+        guard let start = reply.firstIndex(of: "{"),
+              let end = reply.lastIndex(of: "}"),
+              start < end,
+              let object = try? JSONSerialization.jsonObject(with: Data(String(reply[start...end]).utf8)) as? [String: Any] else {
+            return nil
+        }
+        func intValue(_ key: String) -> Int? {
+            if let value = object[key] as? Int { return value }
+            if let value = object[key] as? Double { return Int(value) }
+            if let value = object[key] as? String { return Int(value) }
+            return nil
+        }
+        guard let x = intValue("x"), let y = intValue("y") else { return nil }
+        return (x, y)
+    }
+
     private static func pngData(from image: CGImage) throws -> Data {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
@@ -520,6 +647,7 @@ public enum VisionActionLoop {
         {"action":"done","x":null,"y":null,"target":"","rationale":"<why>"}
         {"action":"stuck","x":null,"y":null,"target":"","rationale":"<why>"}
         Coordinates must be pixels inside this screenshot; click the CENTER of the target control.
+        A red circle-and-crosshair marker, when visible, marks exactly where your PREVIOUS click landed. If the marker is not on the control you intended, your aim was off — compensate your next coordinates in the opposite direction of the miss.
         "type" sends real keystrokes to whatever control currently has keyboard focus — click the text field first in an earlier action if it is not already focused, and only type text the goal itself calls for. To submit what you typed (a chat message, an address bar URL), end the text with \\n — it is delivered as a real Return keypress.
         Use "wait" when the page or app is visibly still loading and the right move is to let it finish.
         Use "done" when the goal is already visibly complete in this screenshot; use "stuck" only after a click, typing, and waiting have all failed to advance the goal.
