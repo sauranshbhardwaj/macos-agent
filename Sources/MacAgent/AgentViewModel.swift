@@ -830,8 +830,13 @@ final class AgentViewModel: ObservableObject {
                 finalSummary = summary.userSummary
                 logStore.append(.summarize, summary.userSummary)
             } catch {
-                setError(error.localizedDescription)
-                logStore.append(.summarize, "Vision experiment stopped: \(error.localizedDescription)")
+                if isCancellationError(error) {
+                    finalSummary = "Canceled."
+                    logStore.append(.summarize, "Vision experiment canceled by user")
+                } else {
+                    setError(error.localizedDescription)
+                    logStore.append(.summarize, "Vision experiment stopped: \(error.localizedDescription)")
+                }
             }
         }
     }

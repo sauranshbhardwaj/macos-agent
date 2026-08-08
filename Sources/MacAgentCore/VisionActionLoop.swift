@@ -171,9 +171,36 @@ public enum VisionActionLoop {
                 let scaleX = frame.width / CGFloat(capture.image.width)
                 let scaleY = frame.height / CGFloat(capture.image.height)
                 let windowPoint = CGPoint(x: CGFloat(x) * scaleX, y: CGFloat(y) * scaleY)
-                // SCWindow.frame and CGEvent both use top-left-origin global display coordinates,
-                // so the mapping is pure translation — no y-flip.
-                let globalPoint = CGPoint(x: frame.origin.x + windowPoint.x, y: frame.origin.y + windowPoint.y)
+
+                // The frame was captured before the vision call, whose latency is uncapped — the
+                // window can move meanwhile. A pure move keeps the model's window-relative point
+                // valid, so translate through the FRESH origin; a resize (or a vanished window)
+                // means the content shifted under the model and the click would be a lie — skip
+                // it and recapture instead.
+                guard let freshFrame = currentWindowFrame(windowID: capture.windowID) else {
+                    emit("iteration \(iteration): window disappeared during model inference — click skipped, recapturing")
+                    history.append("iteration \(iteration): click on \"\(decision.target)\" skipped — the window disappeared; reassess from the new screenshot")
+                    continue
+                }
+                if abs(freshFrame.width - frame.width) > 2 || abs(freshFrame.height - frame.height) > 2 {
+                    emit("iteration \(iteration): window resized during model inference (\(Int(frame.width))x\(Int(frame.height)) -> \(Int(freshFrame.width))x\(Int(freshFrame.height))) — click skipped, recapturing")
+                    history.append("iteration \(iteration): click on \"\(decision.target)\" skipped — the window resized; reassess from the new screenshot")
+                    continue
+                }
+                // SCWindow.frame, kCGWindowBounds, and CGEvent all use top-left-origin global
+                // display coordinates, so the mapping is pure translation — no y-flip.
+                let globalPoint = CGPoint(x: freshFrame.origin.x + windowPoint.x, y: freshFrame.origin.y + windowPoint.y)
+
+                // Sonny's own floating widget is a .floating-level window anchored bottom-center;
+                // a click landing inside any of our own windows would be swallowed by the widget
+                // while the transcript records a normal-looking click on the target app.
+                let ownFrames = await ownWindowFramesInCGSpace()
+                if let blocked = ownFrames.first(where: { $0.contains(globalPoint) }) {
+                    emit("iteration \(iteration): click at global(\(Int(globalPoint.x)),\(Int(globalPoint.y))) suppressed — it falls inside Sonny's own window at \(Int(blocked.origin.x)),\(Int(blocked.origin.y)) \(Int(blocked.width))x\(Int(blocked.height))")
+                    history.append("iteration \(iteration): click on \"\(decision.target)\" was blocked — that screen area is covered by the operator's control panel; pick a different control or report stuck")
+                    try await Task.sleep(nanoseconds: 400_000_000)
+                    continue
+                }
 
                 // Mandated by the ticket's safety note: log BEFORE the click is issued.
                 emit("iteration \(iteration): CLICK image(\(x),\(y)) -> global(\(Int(globalPoint.x)),\(Int(globalPoint.y))) target=\"\(decision.target)\" rationale=\"\(decision.rationale)\"")
@@ -244,6 +271,7 @@ public enum VisionActionLoop {
         let image: CGImage
         let windowFrame: CGRect
         let windowTitle: String
+        let windowID: CGWindowID
     }
 
     private static func captureFrontWindow(ofProcess pid: pid_t, appName: String) async throws -> WindowCapture {
@@ -255,7 +283,13 @@ public enum VisionActionLoop {
                 && window.frame.width >= 80
                 && window.frame.height >= 80
         }
-        guard let window = candidates.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) else {
+        // SCShareableContent's window order is undocumented, but CGWindowListCopyWindowInfo with
+        // onScreenOnly is front-to-back — so the app's actually-frontmost window (a dialog over
+        // its main window, say) is the one the model should see. Largest-area is the fallback.
+        let frontmostID = frontmostWindowID(ofProcess: pid)
+        let window = candidates.first { frontmostID != nil && $0.windowID == frontmostID }
+            ?? candidates.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height })
+        guard let window else {
             throw VisionActionLoopError.captureFailed("no on-screen window found for \(appName) (pid \(pid))")
         }
 
@@ -267,7 +301,55 @@ public enum VisionActionLoop {
 
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-        return WindowCapture(image: image, windowFrame: window.frame, windowTitle: window.title ?? "untitled")
+        return WindowCapture(image: image, windowFrame: window.frame, windowTitle: window.title ?? "untitled", windowID: window.windowID)
+    }
+
+    // Front-to-back z-order scan; the first layer-0 window of the pid is its frontmost.
+    private static func frontmostWindowID(ofProcess pid: pid_t) -> CGWindowID? {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+        for info in list {
+            guard let ownerPID = info[kCGWindowOwnerPID as String] as? Int, pid_t(ownerPID) == pid,
+                  let layer = info[kCGWindowLayer as String] as? Int, layer == 0,
+                  let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
+                  bounds.width >= 80, bounds.height >= 80,
+                  let number = info[kCGWindowNumber as String] as? Int else {
+                continue
+            }
+            return CGWindowID(number)
+        }
+        return nil
+    }
+
+    private static func currentWindowFrame(windowID: CGWindowID) -> CGRect? {
+        guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
+              let info = list.first,
+              let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
+              let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary) else {
+            return nil
+        }
+        return bounds
+    }
+
+    // NSWindow.frame is bottom-left-origin Cocoa space; convert to the top-left-origin global
+    // display space the click math lives in before comparing.
+    private static func ownWindowFramesInCGSpace() async -> [CGRect] {
+        await MainActor.run { () -> [CGRect] in
+            let primaryHeight = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
+                ?? NSScreen.screens.first?.frame.height
+            guard let primaryHeight else { return [] }
+            return NSApp.windows.filter { $0.isVisible }.map { window in
+                let frame = window.frame
+                return CGRect(
+                    x: frame.origin.x,
+                    y: primaryHeight - frame.origin.y - frame.height,
+                    width: frame.width,
+                    height: frame.height
+                )
+            }
+        }
     }
 
     private static func pngData(from image: CGImage) throws -> Data {
@@ -295,7 +377,14 @@ public enum VisionActionLoop {
         post(.mouseMoved)
         try await Task.sleep(nanoseconds: 60_000_000)
         post(.leftMouseDown)
-        try await Task.sleep(nanoseconds: 80_000_000)
+        do {
+            try await Task.sleep(nanoseconds: 80_000_000)
+        } catch {
+            // A cancel landing in this 80ms window must never leave the synthetic left button
+            // held down at the HID level — post the up event, then propagate the cancellation.
+            post(.leftMouseUp)
+            throw error
+        }
         post(.leftMouseUp)
     }
 
@@ -425,7 +514,12 @@ struct VisionModelClient {
               let parts = content["parts"] as? [[String: Any]] else {
             throw VisionActionLoopError.unparseableModelReply(String(data: data, encoding: .utf8) ?? "<unreadable body>")
         }
-        let text = parts.compactMap { $0["text"] as? String }.joined()
+        // Gemma 4 on this endpoint emits thinking parts flagged {"thought": true} ahead of the
+        // real answer (observed live 2026-08-08); concatenating them would bury the JSON reply.
+        let text = parts
+            .filter { ($0["thought"] as? Bool) != true }
+            .compactMap { $0["text"] as? String }
+            .joined()
         guard !text.isEmpty else {
             throw VisionActionLoopError.unparseableModelReply(String(data: data, encoding: .utf8) ?? "<unreadable body>")
         }

@@ -89,20 +89,42 @@ public final class CerebrasPlanner: Planning {
     }
 
     private func requestBody(command: String, priorTaskContext: PriorTaskContext?) -> [String: Any] {
+        // Cerebras's documented structured-output constraints reject the shared plan schema
+        // (5,000-char schema cap vs our ~9.2KB, and no `"type": [T, "null"]` unions, used 25
+        // times) — so the default mode embeds the schema in the system prompt and relies on
+        // AgentPlanDecoder.decodeStrict for enforcement. SONNY_CEREBRAS_STRUCTURED=1 opts into
+        // the native response_format anyway so the rejection/acceptance can be measured live.
+        let useNativeStructured = ProcessInfo.processInfo.environment["SONNY_CEREBRAS_STRUCTURED"] == "1"
+        var systemPrompt = OpenAIPlanner.systemPrompt(toolRegistry: toolRegistry)
+        if !useNativeStructured {
+            systemPrompt += Self.schemaPromptSuffix()
+        }
+
         var messages: [[String: Any]] = [
-            ["role": "system", "content": OpenAIPlanner.systemPrompt(toolRegistry: toolRegistry)]
+            ["role": "system", "content": systemPrompt]
         ]
         if let priorTaskContext {
             messages.append(["role": "user", "content": priorTaskContext.plannerContextText])
         }
         messages.append(["role": "user", "content": command])
 
-        return [
+        var body: [String: Any] = [
             "model": model,
             "messages": messages,
-            "reasoning_effort": "medium",
-            "response_format": Self.chatCompletionsResponseFormat()
+            "reasoning_effort": "medium"
         ]
+        if useNativeStructured {
+            body["response_format"] = Self.chatCompletionsResponseFormat()
+        }
+        return body
+    }
+
+    static func schemaPromptSuffix() -> String {
+        let flat = AgentPlanSchema.responseFormat()
+        let schema = flat["schema"] ?? [:]
+        let data = (try? JSONSerialization.data(withJSONObject: schema, options: [.sortedKeys])) ?? Data()
+        let text = String(data: data, encoding: .utf8) ?? "{}"
+        return "\n\nReturn ONLY a single JSON object — no markdown fences, no commentary — conforming exactly to this JSON Schema:\n" + text
     }
 
     // The shared schema is authored in the Responses `text.format` shape (flat
