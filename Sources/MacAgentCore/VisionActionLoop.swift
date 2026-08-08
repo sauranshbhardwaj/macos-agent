@@ -530,7 +530,7 @@ public enum VisionActionLoop {
             return nil
         }
         let prompt = """
-        Zoomed 2x view of a \(side)x\(side)-pixel region of the same window screenshot, origin top-left. Find this control: "\(target)". Reply ONLY {"x":<int>,"y":<int>} — the exact CENTER of that control in THIS zoomed \(side * 2)x\(side * 2) image — or {"x":null,"y":null} if it is not visible here.
+        Zoomed 2x view of a \(side)x\(side)-pixel region of the same window screenshot, origin top-left. Find this control: "\(target)". Reply ONLY {"x":<int>,"y":<int>} — the point in THIS zoomed \(side * 2)x\(side * 2) image that sits EXACTLY on the target's visible text, in the vertical middle of its glyphs (never the row, container, or whitespace around it) — or {"x":null,"y":null} if it is not visible here.
         """
         guard let response = try? await client.decide(prompt: prompt, pngData: png),
               let refined = parseRefinement(response.reply),
@@ -646,8 +646,8 @@ public enum VisionActionLoop {
         {"action":"wait","x":null,"y":null,"target":"","rationale":"<why>"}
         {"action":"done","x":null,"y":null,"target":"","rationale":"<why>"}
         {"action":"stuck","x":null,"y":null,"target":"","rationale":"<why>"}
-        Coordinates must be pixels inside this screenshot; click the CENTER of the target control.
-        A red circle-and-crosshair marker, when visible, marks exactly where your PREVIOUS click landed. If the marker is not on the control you intended, your aim was off — compensate your next coordinates in the opposite direction of the miss.
+        Coordinates must be pixels inside this screenshot. Aim EXACTLY at the visible text of the target itself: put the point in the vertical middle of the text glyphs (a name, a button label), never on the row, container, or whitespace around it. If the target has both an icon and a text label, click the text label.
+        A red circle-and-crosshair marker, when visible, marks exactly where your PREVIOUS click landed. If the marker is not sitting on the target's text, your aim was off — shift your next coordinates by the same distance in the opposite direction of the miss.
         "type" sends real keystrokes to whatever control currently has keyboard focus — click the text field first in an earlier action if it is not already focused, and only type text the goal itself calls for. To submit what you typed (a chat message, an address bar URL), end the text with \\n — it is delivered as a real Return keypress.
         Use "wait" when the page or app is visibly still loading and the right move is to let it finish.
         Use "done" when the goal is already visibly complete in this screenshot; use "stuck" only after a click, typing, and waiting have all failed to advance the goal.
