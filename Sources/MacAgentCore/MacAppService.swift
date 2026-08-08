@@ -45,6 +45,7 @@ public struct MacAppCatalog: Equatable, Sendable {
         MacApp(displayName: "Apple Music", bundleIdentifier: "com.apple.Music", aliases: ["Music", "iTunes"]),
         MacApp(displayName: "Spotify", bundleIdentifier: "com.spotify.client"),
         MacApp(displayName: "Slack", bundleIdentifier: "com.tinyspeck.slackmacgap"),
+        MacApp(displayName: "Discord", bundleIdentifier: "com.hnc.Discord"),
         MacApp(displayName: "VS Code", bundleIdentifier: "com.microsoft.VSCode", aliases: ["Visual Studio Code", "Code"]),
         MacApp(displayName: "Terminal", bundleIdentifier: "com.apple.Terminal")
     ])
