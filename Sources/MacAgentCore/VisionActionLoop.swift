@@ -47,6 +47,15 @@ public enum VisionActionExperiment {
     }
 }
 
+// SONNY-69 scope amendment (founder, 2026-08-08): where the vision fallback should act when a
+// plan's unsupported remainder is handed to it — the app a supported step opened, the default
+// browser when the plan opened a URL, or whatever is frontmost as the last resort.
+public enum VisionFallbackAppHint: Equatable, Sendable {
+    case browser
+    case app(String)
+    case frontmost
+}
+
 public enum VisionActionLoopError: Error, LocalizedError {
     case missingAPIKey(String)
     case screenRecordingNotGranted
@@ -79,10 +88,17 @@ public enum VisionActionLoopError: Error, LocalizedError {
 public enum VisionActionLoop {
     public static let maxIterations = 10
 
-    public struct ClickRecord: Sendable {
+    public struct ActionRecord: Sendable {
+        public enum Kind: String, Sendable {
+            case click
+            case type
+        }
+
+        public let kind: Kind
         public let iteration: Int
-        public let imagePoint: CGPoint
-        public let globalPoint: CGPoint
+        public let imagePoint: CGPoint?
+        public let globalPoint: CGPoint?
+        public let text: String?
         public let target: String
         public let rationale: String
         public let visionLatencySeconds: Double
@@ -96,20 +112,22 @@ public enum VisionActionLoop {
         }
 
         public let outcome: Outcome
-        public let clicks: [ClickRecord]
+        public let actions: [ActionRecord]
         public let iterations: Int
         public let transcript: [String]
         public let modelDescription: String
 
         public var userSummary: String {
-            let clickPhrase = "\(clicks.count) click\(clicks.count == 1 ? "" : "s") in \(iterations) iteration\(iterations == 1 ? "" : "s") via \(modelDescription)"
+            let clickCount = actions.filter { $0.kind == .click }.count
+            let typeCount = actions.filter { $0.kind == .type }.count
+            let actionPhrase = "\(clickCount) click\(clickCount == 1 ? "" : "s") and \(typeCount) typed input\(typeCount == 1 ? "" : "s") in \(iterations) iteration\(iterations == 1 ? "" : "s") via \(modelDescription)"
             switch outcome {
             case .done(let rationale):
-                return "Vision experiment finished: goal reported done after \(clickPhrase). \(rationale)"
+                return "Vision experiment finished: goal reported done after \(actionPhrase). \(rationale)"
             case .stuck(let rationale):
-                return "Vision experiment stopped: model reported stuck after \(clickPhrase). \(rationale)"
+                return "Vision experiment stopped: model reported stuck after \(actionPhrase). \(rationale)"
             case .iterationCapReached:
-                return "Vision experiment stopped: iteration cap (\(maxIterations)) reached after \(clickPhrase)."
+                return "Vision experiment stopped: iteration cap (\(maxIterations)) reached after \(actionPhrase)."
             }
         }
     }
@@ -127,7 +145,7 @@ public enum VisionActionLoop {
         emit("start host=\(client.host.rawValue) model=\(client.model) app=\"\(request.appName)\" goal=\"\(request.goal)\"")
 
         var history: [String] = []
-        var clicks: [ClickRecord] = []
+        var actions: [ActionRecord] = []
         var iterationsRun = 0
 
         for iteration in 1...maxIterations {
@@ -158,9 +176,28 @@ public enum VisionActionLoop {
 
             switch decision.kind {
             case .done:
-                return RunSummary(outcome: .done(decision.rationale), clicks: clicks, iterations: iteration, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
+                return RunSummary(outcome: .done(decision.rationale), actions: actions, iterations: iteration, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
             case .stuck:
-                return RunSummary(outcome: .stuck(decision.rationale), clicks: clicks, iterations: iteration, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
+                return RunSummary(outcome: .stuck(decision.rationale), actions: actions, iterations: iteration, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
+            case .type:
+                guard let text = decision.text, !text.isEmpty else {
+                    throw VisionActionLoopError.unparseableModelReply(reply)
+                }
+                // Same mandate as clicks: log BEFORE the keystrokes are issued.
+                emit("iteration \(iteration): TYPE \"\(text)\" target=\"\(decision.target)\" rationale=\"\(decision.rationale)\"")
+                try await synthesizeTyping(text)
+                actions.append(ActionRecord(
+                    kind: .type,
+                    iteration: iteration,
+                    imagePoint: nil,
+                    globalPoint: nil,
+                    text: text,
+                    target: decision.target,
+                    rationale: decision.rationale,
+                    visionLatencySeconds: latency
+                ))
+                history.append("iteration \(iteration): typed \"\(text)\" into \"\(decision.target)\" — \(decision.rationale)")
+                try await Task.sleep(nanoseconds: 800_000_000)
             case .click:
                 guard let x = decision.x, let y = decision.y else {
                     throw VisionActionLoopError.unparseableModelReply(reply)
@@ -206,24 +243,54 @@ public enum VisionActionLoop {
                 emit("iteration \(iteration): CLICK image(\(x),\(y)) -> global(\(Int(globalPoint.x)),\(Int(globalPoint.y))) target=\"\(decision.target)\" rationale=\"\(decision.rationale)\"")
                 try await synthesizeClick(at: globalPoint)
 
-                clicks.append(ClickRecord(
+                actions.append(ActionRecord(
+                    kind: .click,
                     iteration: iteration,
                     imagePoint: CGPoint(x: x, y: y),
                     globalPoint: globalPoint,
+                    text: nil,
                     target: decision.target,
                     rationale: decision.rationale,
                     visionLatencySeconds: latency
                 ))
                 history.append("iteration \(iteration): clicked \"\(decision.target)\" at image (\(x), \(y)) — \(decision.rationale)")
-                if let previous = clicks.dropLast().last,
-                   abs(previous.imagePoint.x - CGFloat(x)) <= 5, abs(previous.imagePoint.y - CGFloat(y)) <= 5 {
+                let clickActions = actions.filter { $0.kind == .click }
+                if let previous = clickActions.dropLast().last, let previousPoint = previous.imagePoint,
+                   abs(previousPoint.x - CGFloat(x)) <= 5, abs(previousPoint.y - CGFloat(y)) <= 5 {
                     history.append("warning: you clicked this same spot twice with no visible effect — choose a different control or report stuck")
                 }
                 try await Task.sleep(nanoseconds: 1_200_000_000)
             }
         }
 
-        return RunSummary(outcome: .iterationCapReached, clicks: clicks, iterations: iterationsRun, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
+        return RunSummary(outcome: .iterationCapReached, actions: actions, iterations: iterationsRun, transcript: transcript, modelDescription: "\(client.host.rawValue)/\(client.model)")
+    }
+
+    // MARK: - Fallback target resolution
+
+    public static func resolveAppName(for hint: VisionFallbackAppHint) async -> String? {
+        switch hint {
+        case .app(let name):
+            return name
+        case .browser:
+            return await MainActor.run { () -> String? in
+                guard let httpsURL = URL(string: "https://example.com"),
+                      let appURL = NSWorkspace.shared.urlForApplication(toOpen: httpsURL),
+                      let bundle = Bundle(url: appURL) else {
+                    return nil
+                }
+                return (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+                    ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+                    ?? appURL.deletingPathExtension().lastPathComponent
+            }
+        case .frontmost:
+            return await MainActor.run { () -> String? in
+                // Sonny itself being frontmost is never a useful vision target.
+                let ownName = NSRunningApplication.current.localizedName
+                let frontName = NSWorkspace.shared.frontmostApplication?.localizedName
+                return frontName == ownName ? nil : frontName
+            }
+        }
     }
 
     // MARK: - Permissions
@@ -388,6 +455,29 @@ public enum VisionActionLoop {
         post(.leftMouseUp)
     }
 
+    // Unicode-string keyboard events (virtual key 0 + keyboardSetUnicodeString) type arbitrary
+    // text into the focused control without layout/keycode mapping; ≤20 UTF-16 units per event
+    // is the API's documented chunk limit.
+    private static func synthesizeTyping(_ text: String) async throws {
+        guard let source = CGEventSource(stateID: .hidSystemState) else {
+            throw VisionActionLoopError.captureFailed("could not create CGEventSource")
+        }
+        let units = Array(text.utf16)
+        var index = 0
+        while index < units.count {
+            let chunk = Array(units[index..<min(index + 20, units.count)])
+            for keyDown in [true, false] {
+                guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown) else { continue }
+                chunk.withUnsafeBufferPointer { buffer in
+                    event.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: buffer.baseAddress)
+                }
+                event.post(tap: .cghidEventTap)
+            }
+            index += 20
+            try await Task.sleep(nanoseconds: 40_000_000)
+        }
+    }
+
     // MARK: - Prompt
 
     private static func decisionPrompt(
@@ -406,11 +496,14 @@ public enum VisionActionLoop {
         Actions already taken:
         \(historyBlock)
 
-        Decide the single next action toward the goal. Reply with ONLY a JSON object, no markdown fences, no extra text:
+        Decide the single next action toward the goal. Reply with ONLY a JSON object, no markdown fences, no extra text. One of:
         {"action":"click","x":<int>,"y":<int>,"target":"<visible label of the control>","rationale":"<one short sentence>"}
+        {"action":"type","text":"<the literal text to type>","target":"<the focused text field>","rationale":"<one short sentence>"}
+        {"action":"done","x":null,"y":null,"target":"","rationale":"<why>"}
+        {"action":"stuck","x":null,"y":null,"target":"","rationale":"<why>"}
         Coordinates must be pixels inside this screenshot; click the CENTER of the target control.
-        Use {"action":"done","x":null,"y":null,"target":"","rationale":"<why>"} when the goal is already visibly complete in this screenshot.
-        Use {"action":"stuck","x":null,"y":null,"target":"","rationale":"<why>"} if no visible click can advance the goal.
+        "type" sends real keystrokes to whatever control currently has keyboard focus — click the text field first in an earlier action if it is not already focused, and only type text the goal itself calls for.
+        Use "done" when the goal is already visibly complete in this screenshot; use "stuck" if no visible click or typing can advance the goal.
         """
     }
 }
@@ -543,6 +636,7 @@ struct VisionModelClient {
 struct VisionDecision {
     enum Kind: String {
         case click
+        case type
         case done
         case stuck
     }
@@ -550,6 +644,7 @@ struct VisionDecision {
     let kind: Kind
     let x: Int?
     let y: Int?
+    let text: String?
     let target: String
     let rationale: String
 
@@ -575,6 +670,7 @@ struct VisionDecision {
             kind: kind,
             x: intValue("x"),
             y: intValue("y"),
+            text: object["text"] as? String,
             target: object["target"] as? String ?? "",
             rationale: object["rationale"] as? String ?? ""
         )

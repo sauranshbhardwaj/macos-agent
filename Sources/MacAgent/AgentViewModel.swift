@@ -597,6 +597,7 @@ final class AgentViewModel: ObservableObject {
         approvalRequest = nil
         stepStatuses = [:]
         pendingTaskHistoryStartedAt = nil
+        pendingVisionFallback = nil
 
         if preserveUsageForNextStart {
             preserveUsageForNextStart = false
@@ -669,10 +670,39 @@ final class AgentViewModel: ObservableObject {
                     logStore: logStore,
                     recentArtifactStore: recentArtifactStore
                 )
-                prepared = try await runner.prepare(
-                    command: submittedCommand,
-                    priorTaskContext: priorContextForPlanner
-                )
+                if VisionActionExperiment.isEnabled {
+                    // SONNY-69 scope amendment (founder, 2026-08-08): with the experiment gate on,
+                    // a plan blocked only by unsupported steps routes its remainder to the vision
+                    // loop instead of dying in validateSupported. Supported steps still execute
+                    // first through the normal approval-checked path; the vision phase runs after
+                    // they complete (see the pendingVisionFallback consumption sites).
+                    let plan = try await planner.plan(command: submittedCommand, priorTaskContext: priorContextForPlanner)
+                    let supportedSteps = plan.steps.filter { $0.operation != .unsupported }
+                    if supportedSteps.count < plan.steps.count {
+                        let hint = Self.visionFallbackAppHint(for: supportedSteps)
+                        if supportedSteps.isEmpty {
+                            logStore.append(.plan, "No supported steps — handing the whole goal to the vision fallback")
+                            await runVisionFallback(PendingVisionFallback(goal: submittedCommand, hint: hint))
+                            return
+                        }
+                        pendingVisionFallback = PendingVisionFallback(goal: submittedCommand, hint: hint)
+                        prepared = try runner.prepare(
+                            plan: AgentPlan(
+                                summary: plan.summary,
+                                requiresConfirmation: plan.requiresConfirmation,
+                                steps: supportedSteps
+                            ),
+                            source: .planner
+                        )
+                    } else {
+                        prepared = try runner.prepare(plan: plan, source: .planner)
+                    }
+                } else {
+                    prepared = try await runner.prepare(
+                        command: submittedCommand,
+                        priorTaskContext: priorContextForPlanner
+                    )
+                }
             }
             self.runner = runner
 
@@ -771,6 +801,10 @@ final class AgentViewModel: ObservableObject {
                 startedAt: taskHistoryStartedAt
             )
             refreshSavedItems()
+            if let fallback = pendingVisionFallback {
+                pendingVisionFallback = nil
+                await runVisionFallback(fallback)
+            }
         } catch {
             if isCancellationError(error) {
                 markAllSteps(.canceled)
@@ -816,27 +850,76 @@ final class AgentViewModel: ObservableObject {
         }
     }
 
+    // SONNY-69 experiment (throwaway): the vision phase queued behind a plan whose unsupported
+    // remainder was split off — set before the supported steps execute, consumed after they
+    // succeed, reset at the top of every performStart so a canceled task can't leak it forward.
+    private struct PendingVisionFallback {
+        let goal: String
+        let hint: VisionFallbackAppHint
+    }
+
+    private var pendingVisionFallback: PendingVisionFallback?
+
+    // The surface the user ends on is the LAST opening step's — "open Notes and ..." targets
+    // Notes, "open snapchat.com and ..." targets the default browser. Frontmost is the last
+    // resort when the plan opened nothing.
+    private static func visionFallbackAppHint(for steps: [AgentStep]) -> VisionFallbackAppHint {
+        let openingOps: Set<AgentOperation> = [.openApp, .switchRunningApp, .openURL, .openAppSearchURL, .openHackerNews]
+        guard let lastOpening = steps.last(where: { openingOps.contains($0.operation) }) else {
+            return .frontmost
+        }
+        switch lastOpening.operation {
+        case .openApp, .switchRunningApp:
+            if let name = lastOpening.appName {
+                return .app(name)
+            }
+            return .frontmost
+        default:
+            return .browser
+        }
+    }
+
+    private func runVisionFallback(_ fallback: PendingVisionFallback) async {
+        guard let appName = await VisionActionLoop.resolveAppName(for: fallback.hint) else {
+            setError("Vision fallback could not determine which app to act in.")
+            return
+        }
+        logStore.append(.plan, "Vision fallback: continuing \"\(fallback.goal)\" in \(appName)")
+        // Give whatever the supported steps just opened a moment to settle before the first
+        // screenshot.
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        guard !Task.isCancelled else {
+            finalSummary = "Canceled."
+            return
+        }
+        await runVisionLoop(VisionActionRequest(appName: appName, goal: fallback.goal))
+    }
+
     // SONNY-69 experiment (throwaway): drives the vision click loop for the env-gated debug
     // command. Errors surface through the same transient `errorMessage` channel as planner
-    // failures; the loop itself prints every capture and click to the console.
+    // failures; the loop itself prints every capture, click, and keystroke to the console.
     private func runVisionExperiment(_ parsed: VisionActionExperiment.ParseOutcome) async {
         switch parsed {
         case .malformed(let hint):
             setError(hint)
         case .request(let request):
             logStore.append(.plan, "Vision experiment: \"\(request.goal)\" in \(request.appName)")
-            do {
-                let summary = try await VisionActionLoop.run(request)
-                finalSummary = summary.userSummary
-                logStore.append(.summarize, summary.userSummary)
-            } catch {
-                if isCancellationError(error) {
-                    finalSummary = "Canceled."
-                    logStore.append(.summarize, "Vision experiment canceled by user")
-                } else {
-                    setError(error.localizedDescription)
-                    logStore.append(.summarize, "Vision experiment stopped: \(error.localizedDescription)")
-                }
+            await runVisionLoop(request)
+        }
+    }
+
+    private func runVisionLoop(_ request: VisionActionRequest) async {
+        do {
+            let summary = try await VisionActionLoop.run(request)
+            finalSummary = summary.userSummary
+            logStore.append(.summarize, summary.userSummary)
+        } catch {
+            if isCancellationError(error) {
+                finalSummary = "Canceled."
+                logStore.append(.summarize, "Vision experiment canceled by user")
+            } else {
+                setError(error.localizedDescription)
+                logStore.append(.summarize, "Vision experiment stopped: \(error.localizedDescription)")
             }
         }
     }
@@ -1820,6 +1903,10 @@ final class AgentViewModel: ObservableObject {
             pendingCommandForPriorTaskContext = nil
             pendingTaskHistoryStartedAt = nil
             refreshSavedItems()
+            if let fallback = pendingVisionFallback {
+                pendingVisionFallback = nil
+                await runVisionFallback(fallback)
+            }
         } catch let error where isCancellationError(error) {
             markAllSteps(.canceled)
             finalSummary = "Canceled."
